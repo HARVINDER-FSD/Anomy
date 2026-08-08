@@ -82,8 +82,7 @@
           "android": {
             "minSdkVersion": 24,
             "enableProguardInReleaseBuilds": true,
-            "enableMinifyInReleaseBuilds": true,
-            "kotlinVersion": "2.1.0"
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ],
