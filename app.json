@@ -85,7 +85,8 @@
             "minSdkVersion": 24,
             "enableProguardInReleaseBuilds": true,
             "enableMinifyInReleaseBuilds": true,
-            "gradleVersion": "8.10.2"
+            "gradleVersion": "8.10.2",
+            "kotlinVersion": "2.0.21"
           }
         }
       ],
