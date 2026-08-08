@@ -110,9 +110,7 @@
       }
     },
     "owner": "anufi",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/7127a361-ef48-403a-8412-5c34afd90feb"
     }
