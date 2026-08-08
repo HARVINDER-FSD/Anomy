@@ -93,7 +93,9 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-9263147466443083~3186363669",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "android_app_id": "ca-app-pub-9263147466443083~3186363669",
+          "ios_app_id": "ca-app-pub-3940256099942544~1458002511"
         }
       ]
     ],
@@ -114,5 +116,11 @@
     "updates": {
       "url": "https://u.expo.dev/7127a361-ef48-403a-8412-5c34afd90feb"
     }
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-9263147466443083~3186363669",
+    "ios_app_id": "ca-app-pub-3940256099942544~1458002511",
+    "androidAppId": "ca-app-pub-9263147466443083~3186363669",
+    "iosAppId": "ca-app-pub-3940256099942544~1458002511"
   }
 }
