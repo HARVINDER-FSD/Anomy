@@ -89,6 +89,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-video",
+      "./plugins/withAdMob",
       [
         "react-native-google-mobile-ads",
         {
