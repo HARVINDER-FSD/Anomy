@@ -9,7 +9,7 @@ import { COLORS } from '@/src/theme/colors';
 type ResetStep = 'EMAIL' | 'OTP' | 'PASSWORD';
 
 export default function ForgotPasswordScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
   
   const [step, setStep] = useState<ResetStep>('EMAIL');
@@ -184,6 +184,8 @@ export default function ForgotPasswordScreen() {
 }
 
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },

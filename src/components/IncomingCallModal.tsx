@@ -5,6 +5,7 @@ import { useCall } from '@/src/context/CallContext';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
 import { moderateScale, moderateFont } from '@/src/utils/responsive';
+import { resolveAvatarUrl } from '@/src/utils/imageUtils';
 
 export const IncomingCallModal: React.FC = () => {
   const { callState, acceptCall, rejectCall } = useCall();
@@ -19,7 +20,7 @@ export const IncomingCallModal: React.FC = () => {
           
           <View style={styles.callerInfo}>
             <Image 
-              source={{ uri: `https://ui-avatars.com/api/?name=${callState.callerName || 'U'}&background=random&size=128` }} 
+              source={{ uri: resolveAvatarUrl(callState.callerAvatar || '', callState.callerName || 'User') }} 
               style={styles.avatar} 
             />
             <Text style={styles.callerName}>{callState.callerName}</Text>
@@ -67,6 +68,7 @@ const styles = StyleSheet.create({
   },
   callerInfo: {
     alignItems: 'center',
+    marginTop: moderateScale(40), // Shifted down
   },
   avatar: {
     width: moderateScale(120),

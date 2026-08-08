@@ -1,23 +1,27 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
-  Dimensions, SafeAreaView, Platform, StatusBar, ActivityIndicator, 
-  Alert, Linking 
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
+  Dimensions, SafeAreaView, Platform, StatusBar, ActivityIndicator,
+  Alert, Linking
 } from 'react-native';
 import * as MediaLibrary from 'expo-media-library';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { COLORS } from '../../src/theme/colors';
-import { useEditorStore } from '../../src/store/editorStore';
+import { useAppTheme } from '@/src/theme/colors';
+import { useEditorStore } from '@/src/store/editorStore';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+
 
 const { width } = Dimensions.get('window');
 const ITEM_WIDTH = width / 3 - 1;
 
 const CreateMainScreen = () => {
-  const router = useRouter();
+  const COLORS = useAppTheme();
+  const styles = getStyles(COLORS);
+  const router = useSafeRouter();
   const { addLayer, clearProject, addClip } = useEditorStore();
-  
+
   const [activeTab, setActiveTab] = useState<'post' | 'shots'>('shots');
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +29,10 @@ const CreateMainScreen = () => {
   const [isNativeGridBlocked, setIsNativeGridBlocked] = useState(false);
 
   // 1. Logic to Load Native Media Grid
-  const loadMediaGrid = useCallback(async () => {
+  const loadMediaGrid = useCallback(async (forceGranted = false) => {
+    if (permissionStatus !== 'granted' && !forceGranted) {
+      return;
+    }
     try {
       setLoading(true);
       const { assets: fetchedAssets } = await MediaLibrary.getAssetsAsync({
@@ -36,39 +43,47 @@ const CreateMainScreen = () => {
       setAssets(fetchedAssets);
       setIsNativeGridBlocked(false);
     } catch (e: any) {
-      console.warn('[loadMediaGrid] Failed:', e.message);
-      // If it fails with the "AUDIO" error, we mark it as blocked but show fallback
-      if (e.message.includes('AUDIO')) {
+      // If it fails with permission or audio issues, fallback to manual gallery picker
+      if (e.message.includes('permission') || e.message.includes('Permission') || e.message.includes('AUDIO')) {
         setIsNativeGridBlocked(true);
       }
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, permissionStatus]);
 
   // 2. Initial Permission Check & Request (SAFER VERSION)
   const checkAndRequestPermissions = async () => {
     try {
       setLoading(true);
-      // 🛡️ CRITICAL: We use ImagePicker to check permissions because MediaLibrary crashes 
-      // if the manifest is missing the AUDIO entry. ImagePicker is safer.
-      const { status: existingStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
-      
-      if (existingStatus === 'granted') {
+      let status = 'denied';
+      try {
+        const res = await MediaLibrary.requestPermissionsAsync();
+        status = res.status;
+      } catch (err) {
+      }
+
+      if (status === 'granted') {
         setPermissionStatus('granted' as any);
-        loadMediaGrid();
+        loadMediaGrid(true);
       } else {
-        const { status: newStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        setPermissionStatus(newStatus as any);
-        if (newStatus === 'granted') {
-          loadMediaGrid();
+        // 🛡️ Fallback: We use ImagePicker as check/request fallback
+        const { status: existingStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (existingStatus === 'granted') {
+          setPermissionStatus('granted' as any);
+          loadMediaGrid(true);
+        } else {
+          const { status: newStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          setPermissionStatus(newStatus as any);
+          if (newStatus === 'granted') {
+            loadMediaGrid(true);
+          }
         }
       }
     } catch (err: any) {
-      console.error('[Permissions] Safer check failed, falling back:', err.message);
       // If even ImagePicker fails, we just show the manual picker button
       setIsNativeGridBlocked(true);
-      setPermissionStatus('granted' as any); 
+      setPermissionStatus('granted' as any);
     } finally {
       setLoading(false);
     }
@@ -137,8 +152,8 @@ const CreateMainScreen = () => {
       // 📝 Go to Post Editor for 'POST' tab or image selection
       router.push({
         pathname: '/post-editor',
-        params: { 
-          mediaUri: uri, 
+        params: {
+          mediaUri: uri,
           mediaType: isVideo ? 'video' : 'image',
           postType: activeTab // Pass tab context to post screen
         }
@@ -209,22 +224,21 @@ const CreateMainScreen = () => {
       </SafeAreaView>
     );
   }
-
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      
+      <StatusBar barStyle={COLORS.background === '#121212' ? 'light-content' : 'dark-content'} />
+
       {/* 🧭 HEADER & TABS */}
       <View style={styles.header}>
         <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'post' && styles.tabActive]} 
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'post' && styles.tabActive]}
             onPress={() => setActiveTab('post')}
           >
             <Text style={[styles.tabText, activeTab === 'post' && styles.tabTextActive]}>POST</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'shots' && styles.tabActive]} 
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'shots' && styles.tabActive]}
             onPress={() => setActiveTab('shots')}
           >
             <Text style={[styles.tabText, activeTab === 'shots' && styles.tabTextActive]}>SHOTS</Text>
@@ -242,9 +256,9 @@ const CreateMainScreen = () => {
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
-                <TouchableOpacity 
-                  activeOpacity={0.85} 
-                  style={styles.gridItem} 
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.gridItem}
                   onPress={() => handleGridAssetPress(item)}
                 >
                   <Image source={{ uri: item.uri }} style={styles.gridImage} />
@@ -259,20 +273,20 @@ const CreateMainScreen = () => {
               contentContainerStyle={styles.listContent}
               ListHeaderComponent={() => (
                 <TouchableOpacity style={styles.albumHeader} onPress={openDirectPicker}>
-                   <View style={styles.albumIconBox}>
-                      <Ionicons name="albums" size={20} color="#FFF" />
-                   </View>
-                   <Text style={styles.albumHeaderText}>Select from other albums</Text>
-                   <Ionicons name="chevron-forward" size={18} color={COLORS.subtitle} />
+                  <View style={styles.albumIconBox}>
+                    <Ionicons name="albums" size={20} color="#000" />
+                  </View>
+                  <Text style={styles.albumHeaderText}>Select from other albums</Text>
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.subtitle} />
                 </TouchableOpacity>
               )}
               ListEmptyComponent={() => (
                 <View style={styles.emptyContainer}>
-                   <Ionicons name="images-outline" size={60} color="#333" />
-                   <Text style={styles.emptyText}>No media found in your gallery</Text>
-                   <TouchableOpacity style={styles.retryBtn} onPress={openDirectPicker}>
-                      <Text style={styles.retryBtnText}>Try Direct Picker</Text>
-                   </TouchableOpacity>
+                  <Ionicons name="images-outline" size={60} color="#DDD" />
+                  <Text style={styles.emptyText}>No media found in your gallery</Text>
+                  <TouchableOpacity style={styles.retryBtn} onPress={openDirectPicker}>
+                    <Text style={styles.retryBtnText}>Try Direct Picker</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             />
@@ -280,29 +294,28 @@ const CreateMainScreen = () => {
         </>
       )}
 
-      {/* 📸 CAMERA BUTTON */}
+      {/* 📸 FLOATING CAMERA BUTTON */}
       <TouchableOpacity style={styles.cameraFab} onPress={openCamera}>
-         <View style={styles.fabGlow} />
-         <Ionicons name="camera" size={32} color="#FFF" />
+        <Ionicons name="camera" size={32} color="#FFF" />
       </TouchableOpacity>
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+const getStyles = (COLORS: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: COLORS.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  
-  header: { 
-    paddingTop: Platform.OS === 'ios' ? 20 : 40,
-    paddingBottom: 15, 
-    alignItems: 'center', 
-    borderBottomWidth: 0.5, 
-    borderBottomColor: '#222' 
+
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 40 : 60, // Increased for "halka niche"
+    paddingBottom: 20,
+    alignItems: 'center',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#EEE'
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#111',
+    backgroundColor: '#F0F0F0',
     borderRadius: 25,
     padding: 3,
     width: width * 0.65,
@@ -316,71 +329,64 @@ const styles = StyleSheet.create({
   tabActive: {
     backgroundColor: COLORS.primary,
   },
-  tabText: { color: '#666', fontSize: 13, fontWeight: '800', letterSpacing: 1 },
+  tabText: { color: '#999', fontSize: 13, fontWeight: '800', letterSpacing: 1 },
   tabTextActive: { color: '#FFF' },
-  
+
   listContent: { paddingBottom: 100 },
   gridItem: { width: ITEM_WIDTH, height: ITEM_WIDTH, margin: 0.5 },
-  gridImage: { width: '100%', height: '100%' },
-  
+  gridImage: { width: '100%', height: '100%', backgroundColor: '#F0F0F0' },
+
   albumHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#FFF',
     marginBottom: 1,
   },
   albumIconBox: {
-    width: 36, height: 36, borderRadius: 8, 
-    backgroundColor: '#222', justifyContent: 'center', 
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: '#F5F5F5', justifyContent: 'center',
     alignItems: 'center', marginRight: 12
   },
-  albumHeaderText: { color: '#FFF', fontWeight: '600', flex: 1, fontSize: 15 },
+  albumHeaderText: { color: COLORS.text, fontWeight: '600', flex: 1, fontSize: 15 },
 
-  videoBadge: { 
-    position: 'absolute', bottom: 8, right: 8, 
-    flexDirection: 'row', alignItems: 'center', 
-    backgroundColor: 'rgba(0,0,0,0.6)', 
+  videoBadge: {
+    position: 'absolute', bottom: 8, right: 8,
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10,
   },
   durationText: { color: '#FFF', fontSize: 9, fontWeight: '900', marginLeft: 3 },
 
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  iconCircle: { 
-    width: 100, height: 100, borderRadius: 50, 
-    backgroundColor: '#111', justifyContent: 'center', 
-    alignItems: 'center', marginBottom: 24 
+  iconCircle: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: '#F5F5F5', justifyContent: 'center',
+    alignItems: 'center', marginBottom: 24
   },
-  title: { color: '#FFF', fontSize: 24, fontWeight: '800', textAlign: 'center' },
-  description: { 
-    color: COLORS.subtitle, fontSize: 15, textAlign: 'center', 
-    marginTop: 12, lineHeight: 22, marginBottom: 30 
+  title: { color: COLORS.text, fontSize: 24, fontWeight: '800', textAlign: 'center' },
+  description: {
+    color: COLORS.subtitle, fontSize: 15, textAlign: 'center',
+    marginTop: 12, lineHeight: 22, marginBottom: 30
   },
-  actionBtn: { 
-    backgroundColor: COLORS.primary, paddingVertical: 16, 
-    paddingHorizontal: 35, borderRadius: 30, flexDirection: 'row', alignItems: 'center' 
+  actionBtn: {
+    backgroundColor: COLORS.primary, paddingVertical: 16,
+    paddingHorizontal: 35, borderRadius: 30, flexDirection: 'row', alignItems: 'center'
   },
   actionBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  
-  fixHint: { color: '#333', fontSize: 10, marginTop: 50, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+
+  fixHint: { color: '#EEE', fontSize: 10, marginTop: 50, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
 
   emptyContainer: { flex: 1, alignItems: 'center', marginTop: 100, padding: 20 },
-  emptyText: { color: '#444', marginTop: 15, fontSize: 16, textAlign: 'center' },
+  emptyText: { color: '#999', marginTop: 15, fontSize: 16, textAlign: 'center' },
   retryBtn: { marginTop: 20, padding: 10 },
-  retryBtnText: { color: COLORS.secondary, fontWeight: 'bold' },
+  retryBtnText: { color: COLORS.primary, fontWeight: 'bold' },
 
   cameraFab: {
-     position: 'absolute', bottom: 40, right: 25,
-     width: 70, height: 70, borderRadius: 35,
-     backgroundColor: COLORS.primary, justifyContent: 'center',
-     alignItems: 'center', zIndex: 1000, elevation: 10,
-     shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 5 },
-     shadowOpacity: 0.5, shadowRadius: 10
-  },
-  fabGlow: {
-    ...StyleSheet.absoluteFillObject, borderRadius: 35,
-    backgroundColor: COLORS.primary, opacity: 0.3,
-    transform: [{ scale: 1.25 }], zIndex: -1
+    position: 'absolute', bottom: 100, right: 20,
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: COLORS.primary, justifyContent: 'center',
+    alignItems: 'center', zIndex: 1000
   }
 });
 

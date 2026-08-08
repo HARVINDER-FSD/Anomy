@@ -1,42 +1,58 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions, Platform, Alert } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions, Platform, Alert } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { useAuthStore } from '@/src/store/authStore';
 import { verticalScale, moderateFont, SIZES } from '@/src/utils/responsive';
-import { PostCard } from '@/src/components/PostCard'; // I need to check if this exists or create it
+import { PostCard } from '@/src/components/PostCard';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { FlashList } from '@shopify/flash-list';
+const FastFlashList = FlashList as React.ComponentType<any>;
+import { useUserCacheStore } from '@/src/store/userCacheStore';
+import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
+import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
 
 export default function UserPostsFeedScreen() {
   const { userId, initialPostId, username } = useLocalSearchParams();
-  const router = useRouter();
+  const router = useSafeRouter();
   const { user: currentUser } = useAuthStore();
   
-  const [posts, setPosts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = (username as string) || (userId as string) || '';
+  const cachedUser = useUserCacheStore.getState().getUserCache(cacheKey);
+
+  const [posts, setPosts] = useState<any[]>(() => cachedUser?.posts || []);
+  const [loading, setLoading] = useState(() => !cachedUser?.posts || cachedUser.posts.length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [initialScrollDone, setInitialScrollDone] = useState(false);
   
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
 
   const fetchPosts = async (pageNum: number, isRefresh = false) => {
+    const hasCache = posts.length > 0;
+    performanceEngine.startScreenTrace('UserPostsFeedScreen');
+    performanceEngine.trackCacheAccess('Profile', hasCache);
+
     try {
       const res = await apiClient.get(`/users/${userId}/posts?page=${pageNum}&limit=10`);
       const newPosts = res.data.data || [];
       
       if (isRefresh) {
         setPosts(newPosts);
+        if (cacheKey) {
+          useUserCacheStore.getState().setUserCache(cacheKey, { posts: newPosts });
+        }
       } else {
         setPosts(prev => [...prev, ...newPosts]);
       }
       
       setHasMore(newPosts.length === 10);
       setPage(pageNum);
+      performanceEngine.endScreenTrace('UserPostsFeedScreen', hasCache);
     } catch (error) {
-      console.error("Error fetching user posts:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -55,9 +71,6 @@ export default function UserPostsFeedScreen() {
           flatListRef.current?.scrollToIndex({ index, animated: false });
           setInitialScrollDone(true);
         }, 100);
-      } else if (hasMore) {
-        // If not found in first page, fetch more (optional complexity)
-        // For now, we assume it's in the first page or we just show the feed
       }
     }
   }, [posts, initialPostId, initialScrollDone]);
@@ -91,11 +104,11 @@ export default function UserPostsFeedScreen() {
           <ActivityIndicator size="large" color={COLORS.secondary} />
         </View>
       ) : (
-        <FlatList
+        <FastFlashList
           ref={flatListRef}
           data={posts}
-          keyExtractor={(item) => item._id || item.id}
-          renderItem={({ item }) => (
+          keyExtractor={(item: any) => item._id || item.id}
+          renderItem={({ item }: { item: any }) => (
             <PostCard 
               post={item} 
               currentUserId={currentUser?.id}
@@ -104,23 +117,18 @@ export default function UserPostsFeedScreen() {
               }}
             />
           )}
+          estimatedItemSize={280}
+          drawDistance={300}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          getItemLayout={(data, index) => ({
-            length: 500, // Estimated height of a post card
-            offset: 500 * index,
-            index,
-          })}
-          onScrollToIndexFailed={(info) => {
-            flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
-          }}
           ListFooterComponent={() => (
             hasMore ? <ActivityIndicator size="small" color={COLORS.secondary} style={{ marginVertical: 20 }} /> : null
           )}
         />
       )}
+      <PerformanceOverlay />
     </SafeAreaView>
   );
 }

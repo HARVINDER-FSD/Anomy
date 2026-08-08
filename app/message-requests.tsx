@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, RefreshControl, Platform, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,9 +6,11 @@ import { COLORS } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { verticalScale } from '@/src/utils/responsive';
 import { resolveAvatarUrl } from '@/src/utils/imageUtils';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+
 
 export default function MessageRequestsScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -19,8 +21,13 @@ export default function MessageRequestsScreen() {
       if (res.data.success) {
         setRequests(res.data.data);
       }
-    } catch (error) {
-      console.error('Error fetching message requests:', error);
+    } catch (error: any) {
+      // If user not found, logout to force re-login
+      if (error.message?.includes('User not found') || error.status === 404) {
+        const { useAuthStore } = await import('@/src/store/authStore');
+        await useAuthStore.getState().logout();
+        Alert.alert('Session Expired', 'Please log in again');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -39,7 +46,6 @@ export default function MessageRequestsScreen() {
         Alert.alert("Success", "Request accepted. You can now chat!");
       }
     } catch (error) {
-      console.error("Error accepting request:", error);
       Alert.alert("Error", "Could not accept request.");
     }
   };
@@ -51,22 +57,28 @@ export default function MessageRequestsScreen() {
         setRequests(prev => prev.filter(r => r.id !== requestId));
       }
     } catch (error) {
-      console.error("Error rejecting request:", error);
       Alert.alert("Error", "Could not delete request.");
     }
   };
 
   const renderRequest = ({ item }: { item: any }) => {
     const sender = item.sender;
+    const isAnonymous = item.is_anonymous || item.isAnonymous;
+    
+    // Ghost Persona if anonymous
+    const displayAvatar = isAnonymous ? 'https://api.dicebear.com/7.x/avataaars/png?seed=ghost' : resolveAvatarUrl(sender?.profileImage || sender?.avatar_url, sender?.username);
+    const displayUsername = isAnonymous ? 'Ghost User 👻' : (sender?.username || 'AnuFy User');
+    const displayFullName = isAnonymous ? 'Secret Whisper' : (sender?.fullName || sender?.full_name || '');
+
     return (
       <View style={styles.requestItem}>
         <Image 
-          source={{ uri: resolveAvatarUrl(sender?.profileImage || sender?.avatar_url, sender?.username) }} 
+          source={{ uri: displayAvatar }} 
           style={styles.avatar} 
         />
         <View style={styles.info}>
-          <Text style={styles.username}>{sender?.username || 'AnuFy User'}</Text>
-          <Text style={styles.fullName}>{sender?.fullName || sender?.full_name || ''}</Text>
+          <Text style={[styles.username, isAnonymous && { color: COLORS.primary, fontWeight: '700' }]}>{displayUsername}</Text>
+          <Text style={styles.fullName}>{displayFullName}</Text>
           <Text style={styles.time}>Requested {new Date(item.createdAt).toLocaleDateString()}</Text>
         </View>
         <View style={styles.actions}>
@@ -132,7 +144,7 @@ const styles = StyleSheet.create({
   requestItem: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 0.5, borderBottomColor: COLORS.border + '50' },
   avatar: { width: 56, height: 56, borderRadius: 28, marginRight: 15, borderWidth: 1, borderColor: COLORS.border },
   info: { flex: 1 },
-  username: { fontSize: 16, fontWeight: 'bold', color: COLORS.text },
+  username: { fontSize: 16, fontWeight: '400', color: COLORS.text },
   fullName: { fontSize: 14, color: COLORS.subtitle },
   time: { fontSize: 11, color: COLORS.subtitle, marginTop: 4 },
   actions: { flexDirection: 'row', gap: 10, alignItems: 'center' },

@@ -1,22 +1,55 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, Image, TouchableOpacity, Platform, SafeAreaView, StatusBar, Alert, Share } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+﻿import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, RefreshControl, Image, TouchableOpacity, Platform, SafeAreaView, StatusBar, Alert, Share } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAuthStore } from '@/src/store/authStore';
+
+interface ProfilePostVideoItemProps {
+  uri: string;
+  shouldPlay: boolean;
+  style: any;
+}
+
+const ProfilePostVideoItem = ({ uri, shouldPlay, style }: ProfilePostVideoItemProps) => {
+  const player = useVideoPlayer(uri, p => {
+    p.loop = true;
+    p.muted = false;
+  });
+
+  useEffect(() => {
+    if (shouldPlay) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [shouldPlay, player]);
+
+  return (
+    <VideoView
+      player={player}
+      style={style}
+      contentFit="cover"
+      nativeControls={true}
+    />
+  );
+};
 import { apiClient } from '@/src/api/client';
-import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { COLORS } from '@/src/theme/colors';
 import { socketService } from '@/src/lib/socket';
 import * as Haptics from 'expo-haptics';
 import { ShareModal } from '@/components/ShareModal';
-import { Dimensions } from 'react-native';
 import { scale, verticalScale, moderateScale, moderateFont, SIZES } from '@/src/utils/responsive';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { useIsFocused } from '@react-navigation/native';
 
 export default function ProfilePostFeedScreen() {
+  const isFocused = useIsFocused();
   const { userId, username, initialPostId } = useLocalSearchParams();
-  const router = useRouter();
-  const { user } = useAuthStore();
+  const router = useSafeRouter();
+  const user = useAuthStore((s) => s.user);
   const isAnonymous = user?.isAnonymousMode;
   
   const [posts, setPosts] = useState<any[]>([]);
@@ -24,6 +57,7 @@ export default function ProfilePostFeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [visibleVideoId, setVisibleVideoId] = useState<string | null>(null);
   
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<{ 
@@ -33,7 +67,21 @@ export default function ProfilePostFeedScreen() {
     mediaType?: 'image' | 'video'
   } | null>(null);
 
-  const flatListRef = useRef<FlatList>(null);
+  const flashListRef = useRef<any>(null);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      const first = viewableItems[0];
+      if (first?.item) {
+        const id = first.item._id || first.item.id;
+        if (id) setVisibleVideoId(String(id));
+      }
+    }
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+  }).current;
 
   const fetchUserPosts = async (pageNum = 1, isRefresh = false) => {
     if (!userId) return;
@@ -51,7 +99,6 @@ export default function ProfilePostFeedScreen() {
         setHasMore(false);
       }
     } catch (error) {
-      console.error("Error fetching profile feed:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -144,7 +191,6 @@ export default function ProfilePostFeedScreen() {
         await apiClient.post(`/posts/${postId}/like`);
       }
     } catch (error) {
-      console.error("Like error:", error);
     }
   };
 
@@ -160,7 +206,6 @@ export default function ProfilePostFeedScreen() {
     try {
       await apiClient.post(`/posts/${postId}/bookmark`);
     } catch (error) {
-       console.error("Bookmark error:", error);
     }
   };
 
@@ -174,6 +219,9 @@ export default function ProfilePostFeedScreen() {
 
   const renderPost = ({ item }: { item: any }) => {
     const postId = item._id || item.id;
+    const isVisible = String(postId) === visibleVideoId;
+    const shouldPlayVideo = isVisible && isFocused;
+
     return (
       <View style={[styles.postCard, isAnonymous && { backgroundColor: '#0A0A0A', borderBottomWidth: 1, borderBottomColor: '#1A1A1A' }]}>
         <View style={styles.postHeader}>
@@ -191,13 +239,10 @@ export default function ProfilePostFeedScreen() {
 
         {item.media_urls && item.media_urls.length > 0 ? (
           item.media_type === 'video' ? (
-            <Video
-              source={{ uri: resolveMediaUrl(item.media_urls[0]) }}
+            <ProfilePostVideoItem
+              uri={resolveMediaUrl(item.media_urls[0])}
+              shouldPlay={shouldPlayVideo}
               style={styles.postImage}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              shouldPlay
-              useNativeControls
             />
           ) : (
             <Image source={{ uri: resolveMediaUrl(item.media_urls[0]) }} style={styles.postImage} resizeMode="cover" />
@@ -227,7 +272,7 @@ export default function ProfilePostFeedScreen() {
                 handleShare(postId, item.content || item.caption, mediaUrl, item.media_type);
               }}
             >
-              <Ionicons name="paper-plane-outline" size={26} color={isAnonymous ? '#FFF' : COLORS.text} />
+              <MaterialCommunityIcons name="arrow-u-right-top" size={26} color={isAnonymous ? '#FFF' : COLORS.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => handleBookmark(postId, item.isBookmarked)}>
               <Ionicons name={item.isBookmarked ? 'bookmark' : 'bookmark-outline'} size={26} color={item.isBookmarked ? (isAnonymous ? '#FFF' : COLORS.secondary) : (isAnonymous ? '#FFF' : COLORS.text)} />
@@ -259,11 +304,13 @@ export default function ProfilePostFeedScreen() {
       const index = posts.findIndex(p => (p._id || p.id) === initialPostId);
       if (index !== -1) {
         setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ index, animated: false });
+          flashListRef.current?.scrollToIndex({ index, animated: false });
         }, 100);
       }
     }
   }, [posts.length, initialPostId]);
+
+  const renderPostItem = useCallback(({ item }: { item: any }) => renderPost({ item }), [renderPost]);
 
   return (
     <SafeAreaView style={[styles.container, isAnonymous && { backgroundColor: COLORS.black }]}>
@@ -279,13 +326,15 @@ export default function ProfilePostFeedScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <FlatList
-        ref={flatListRef}
+      <FlashList<any>
+        ref={flashListRef}
         data={posts}
         keyExtractor={(item, index) => item._id || item.id || String(index)}
-        renderItem={renderPost}
+        renderItem={renderPostItem}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
         refreshControl={
           <RefreshControl 
             refreshing={refreshing} 
@@ -306,12 +355,6 @@ export default function ProfilePostFeedScreen() {
             </View>
           )
         }
-        onScrollToIndexFailed={(info) => {
-          const wait = new Promise(resolve => setTimeout(resolve, 500));
-          wait.then(() => {
-            flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
-          });
-        }}
       />
 
       <ShareModal 

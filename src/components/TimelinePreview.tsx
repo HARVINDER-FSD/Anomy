@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useState } from 'react';
+﻿import React, { useRef, useEffect, useState } from 'react';
 import { View, StyleSheet, Dimensions, Text, Image, TouchableOpacity, PanResponder, Animated } from 'react-native';
-import { Video, ResizeMode, Audio } from 'expo-av';
+import { Audio } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useEditorStore, EditorLayer } from '../store/editorStore';
 import { COLORS } from '../theme/colors';
@@ -18,8 +19,78 @@ export const TimelinePreview: React.FC = () => {
     setCurrentTime, setPlaying, selectedLayerId, removeLayer, clips, activeFilter, activeMusic, isMuted 
   } = useEditorStore();
   
-  const mainVideoRef = useRef<Video>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
+
+  // Calculate which clip is currently active based on currentTime
+  const activeClip = clips.find(c => 
+    currentTime >= c.startTime && currentTime < (c.startTime + c.duration)
+  );
+
+  const player = useVideoPlayer(activeClip?.uri || '', p => {
+    p.loop = false;
+    p.muted = isMuted;
+    p.playbackRate = activeClip ? activeClip.speed : 1.0;
+  });
+
+  // Sync mute state
+  useEffect(() => {
+    player.muted = isMuted;
+  }, [isMuted, player]);
+
+  // Sync playback rate
+  useEffect(() => {
+    if (activeClip) {
+      player.playbackRate = activeClip.speed;
+    }
+  }, [activeClip, player]);
+
+  // Sync seek to trim start when loaded
+  useEffect(() => {
+    if (!activeClip) return;
+    const statusSub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') {
+        player.currentTime = activeClip.trimStart / 1000;
+      }
+    });
+    return () => statusSub.remove();
+  }, [player, activeClip]);
+
+  // Sync timeUpdate clock
+  useEffect(() => {
+    const timeSub = player.addListener('timeUpdate', (event) => {
+      if (isPlaying && activeClip) {
+        const posMillis = event.currentTime * 1000;
+        const relativeTime = (posMillis - activeClip.trimStart) / activeClip.speed;
+        const timelineTime = activeClip.startTime + relativeTime;
+        
+        if (Math.abs(timelineTime - currentTime) > 300) {
+          setCurrentTime(timelineTime);
+        }
+        
+        // Check if we reached the end of the trimmed clip
+        if (posMillis >= activeClip.trimEnd - 100) {
+          setPlaying(false);
+          setCurrentTime(0);
+          player.currentTime = activeClip.trimStart / 1000;
+        }
+      }
+    });
+
+    return () => timeSub.remove();
+  }, [player, isPlaying, activeClip, currentTime]);
+
+  // Handle Play/Pause and Seek sync
+  useEffect(() => {
+    if (totalDuration > 0 && activeClip) {
+      if (isPlaying) {
+        player.play();
+      } else {
+        player.pause();
+        const seekPos = activeClip.trimStart + (currentTime - activeClip.startTime) * activeClip.speed;
+        player.currentTime = seekPos / 1000;
+      }
+    }
+  }, [isPlaying, currentTime, activeClip, player, totalDuration]);
 
   // 🎵 SYNC MUSIC PLAYBACK (v2.0 - HARDENED)
   useEffect(() => {
@@ -28,7 +99,6 @@ export const TimelinePreview: React.FC = () => {
     async function loadMusic() {
       if (!activeMusic?.url) return;
       
-      console.log('[AudioSync] Loading Pro Soundtrack:', activeMusic.url);
       try {
         if (soundObject.current) {
           await soundObject.current.unloadAsync();
@@ -41,9 +111,7 @@ export const TimelinePreview: React.FC = () => {
         
         soundObject.current = newSound;
         setSound(newSound);
-        console.log('[AudioSync] Music Ready to Play');
       } catch (e) {
-        console.error('[AudioSync] CRITICAL LOAD FAILURE:', e);
       }
     }
 
@@ -80,66 +148,20 @@ export const TimelinePreview: React.FC = () => {
     }
   }, [currentTime, isPlaying, sound, activeMusic?.trimStart]);
 
-  // 1. Calculate which clip is currently active based on currentTime
-  const activeClip = clips.find(c => 
-    currentTime >= c.startTime && currentTime < (c.startTime + c.duration)
-  );
-
   // 2. Filter ONLY layers active at this millisecond
   const activeLayers = layers.filter(
     (l) => currentTime >= l.startTime && currentTime <= l.endTime
   ).sort((a, b) => a.zIndex - b.zIndex);
 
-  // ⏱️ NATIVE SYNC CLOCK (v2.0 - 60FPS)
-  const onPlaybackStatusUpdate = (status: any) => {
-    if (status.isLoaded && status.isPlaying && !status.isBuffering && activeClip) {
-      // 🚀 THE SMOOTHNESS KEY:
-      // Calculate relative position based on the trimmed clip
-      const relativeTime = (status.positionMillis - activeClip.trimStart) / activeClip.speed;
-      const timelineTime = activeClip.startTime + relativeTime;
-      
-      if (Math.abs(timelineTime - currentTime) > 300) {
-        setCurrentTime(timelineTime);
-      }
-      
-      // Check if we reached the end of the trimmed clip
-      if (status.positionMillis >= activeClip.trimEnd - 100) {
-         setPlaying(false);
-         setCurrentTime(0);
-         mainVideoRef.current?.setPositionAsync(activeClip.trimStart);
-      }
-    }
-  };
-   
-  // Ensure the video plays for FULL duration
-  useEffect(() => {
-    if (mainVideoRef.current && totalDuration > 0 && activeClip) {
-       if (isPlaying) {
-         mainVideoRef.current.playAsync();
-       } else {
-         mainVideoRef.current.pauseAsync();
-         // Sync position during seeking
-         const seekPos = activeClip.trimStart + (currentTime - activeClip.startTime) * activeClip.speed;
-         mainVideoRef.current.setPositionAsync(seekPos);
-       }
-    }
-  }, [isPlaying, currentTime, activeClip?.id]);
-
   return (
     <View style={styles.container}>
       {/* 📹 NATIVE VIDEO PLAYER (CLIP SEQUENCE) */}
       {activeClip && totalDuration > 0 && (
-        <Video
-          ref={mainVideoRef}
+        <VideoView
+          player={player}
           style={StyleSheet.absoluteFill}
-          source={{ uri: activeClip.uri }}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={isPlaying}
-          isMuted={isMuted} // 🚀 FIXED: Video now respects the master mute switch
-          rate={activeClip.speed}
-          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-          // 🚀 ONLY USE POSITION DURING SEEKING (NOT PLAYBACK) - THIS FIXES THE STUTTER (ATAK-ING)
-          {...(!isPlaying ? { positionMillis: activeClip.trimStart + (currentTime - activeClip.startTime) * activeClip.speed } : {})}
+          contentFit="contain"
+          nativeControls={false}
         />
       )}
 

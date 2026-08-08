@@ -105,19 +105,7 @@ export const CustomSplashScreen = () => {
           </Animated.View>
         </View>
 
-        {/* Elegant Footer Reveal */}
-        <Animated.View 
-          style={[
-            styles.footer, 
-            { 
-              opacity: footerOpacity,
-              transform: [{ scale: footerScale }] 
-            }
-          ]}
-        >
-          <Text style={styles.fromText}>crafted by</Text>
-          <Text style={styles.gsText}>GS</Text>
-        </Animated.View>
+        {/* Elegant Footer Reveal - Removed GS Branding */}
       </View>
     </View>
   );
@@ -156,22 +144,18 @@ const styles = StyleSheet.create({
     bottom: verticalScale(50),
     alignItems: 'center',
   },
-  fromText: {
-    fontSize: moderateFont(13),
-    color: 'rgba(0, 0, 0, 0.4)',
-    letterSpacing: 5,
+  footerText: {
+    fontSize: moderateFont(11),
+    color: 'rgba(0, 0, 0, 0.35)',
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    fontWeight: '600',
+    fontWeight: '400',
   },
   gsText: {
-    fontSize: moderateFont(32),
-    fontWeight: '900',
-    color: '#4f46e5', // Deep indigo
-    marginTop: verticalScale(4),
-    letterSpacing: 8,
-    textShadowColor: 'rgba(79, 70, 229, 0.2)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10
+    fontSize: moderateFont(11),
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 2,
   },
 });
 

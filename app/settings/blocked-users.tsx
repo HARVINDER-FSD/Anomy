@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
+﻿import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/src/store/authStore';
@@ -7,9 +7,11 @@ import { apiClient } from '@/src/api/client';
 import { COLORS } from '@/src/theme/colors';
 import { scale, verticalScale, moderateScale, moderateFont } from '@/src/utils/responsive';
 import { resolveAvatarUrl } from '@/src/utils/imageUtils';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+
 
 export default function BlockedUsersScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { updateBlockedUsers } = useAuthStore();
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,41 +27,24 @@ export default function BlockedUsersScreen() {
       const res = await apiClient.get('/users/blocked-list');
       setBlockedUsers(res.data.blocked || []);
     } catch (error: any) {
-      console.error('Error fetching blocked users:', error.response?.status, error.message);
       if (error.response?.status === 404) {
         setBlockedUsers([]);
       } else {
-        Alert.alert('Error', 'Could not load blocked users.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUnblock = (userId: string, username: string) => {
-    Alert.alert(
-      'Unblock User',
-      `Are you sure you want to unblock ${username}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unblock',
-          onPress: async () => {
-            try {
-              const res = await apiClient.post(`/users/unblock-user`, { userId });
-              if (res.data.success) {
-                setBlockedUsers(prev => prev.filter(u => u.id !== userId));
-                updateBlockedUsers(userId, false);
-                Alert.alert('Success', 'User unblocked.');
-              }
-            } catch (error) {
-              console.error('Error unblocking user:', error);
-              Alert.alert('Error', 'Failed to unblock user.');
-            }
-          }
-        }
-      ]
-    );
+  const handleUnblock = async (userId: string, username: string) => {
+    try {
+      const res = await apiClient.post(`/users/unblock-user`, { userId });
+      if (res.data.success) {
+        setBlockedUsers(prev => prev.filter(u => u.id !== userId));
+        updateBlockedUsers(userId, false);
+      }
+    } catch (error) {
+    }
   };
 
   const renderUser = ({ item }: { item: any }) => (

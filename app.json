@@ -1,19 +1,31 @@
 {
   "expo": {
     "name": "Anufi",
-    "slug": "mobile-app",
+    "slug": "anufi-fresh",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "anufi",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/splashicon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anufy.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Anufi to access your camera to take photos and record videos.",
+        "NSMicrophoneUsageDescription": "Allow Anufi to access your microphone to record audio and voice messages.",
+        "NSPhotoLibraryUsageDescription": "Allow Anufi to access your photo library to select and upload photos and videos.",
+        "NSPhotoLibraryAddUsageDescription": "Allow Anufi to save photos and videos to your photo library."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
-        "backgroundColor": "#0D0B2B",
+        "backgroundColor": "#FFFFFF",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
@@ -26,16 +38,12 @@
         "READ_MEDIA_VIDEO",
         "READ_MEDIA_AUDIO",
         "READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO",
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+        "CAMERA"
       ],
-      "package": "com.anufy.app"
+      "package": "com.anufy.app",
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "output": "static",
@@ -46,27 +54,26 @@
       "expo-router",
       "expo-notifications",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splashicon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Allow Anufi to access your photos.",
           "savePhotosPermission": "Allow Anufi to save photos.",
           "videoPermission": "Allow Anufi to access your videos.",
-          "audioPermission": "Allow Anufi to access your sounds.",
           "isStandard": true,
           "granularPermissions": [
             "photo",
             "video",
             "audio"
           ]
-        }
-      ],
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/logo.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
         }
       ],
       [
@@ -81,6 +88,16 @@
             "gradleVersion": "8.10.2"
           }
         }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-video",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-9263147466443083~3186363669",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
       ]
     ],
     "experiments": {
@@ -90,8 +107,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "94a4601e-8660-49ad-98b7-e739f28b4ac4"
+        "projectId": "7127a361-ef48-403a-8412-5c34afd90feb"
       }
+    },
+    "owner": "anufi",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7127a361-ef48-403a-8412-5c34afd90feb"
     }
   }
 }

@@ -1,6 +1,10 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceEventEmitter } from 'react-native';
 import { socketService } from '../lib/socket';
+import { apiClient } from '../api/client';
+import { useChatStore } from './chatStore';
+import { useBootstrapStore } from './bootstrapStore';
 
 export interface User {
   id: string;
@@ -16,6 +20,7 @@ export interface User {
   following_count?: number;
   posts_count?: number;
   is_verified?: boolean;
+  badge_type?: string | null;
   is_private?: boolean;
   blocked_users?: string[];
   restricted_users?: string[];
@@ -27,13 +32,20 @@ export interface User {
     avatar: string;
   };
   customReactions?: string[];
+  phone?: string;
+  dob?: string;
+  birthday?: string;
+  gender?: string;
+  website?: string;
+  location?: string;
+  account_type?: string;
 }
 
 interface AuthState {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  setAuth: (user: User, token: string) => Promise<void>;
+  setAuth: (user: User, token: string, refreshToken?: string) => Promise<void>;
   logout: () => Promise<void>;
   initializeAuth: () => Promise<void>;
   toggleAnonymousMode: () => Promise<void>;
@@ -46,92 +58,221 @@ export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   isLoading: true, // App start hotie hi true rhega taaki pehle async check ho ki token h nai.
 
-  // Jab User Login ya Signup kare to yeh call krna hoga: setup credential on app memory and phone storage
-  setAuth: async (user, token) => {
-    await AsyncStorage.setItem('auth-token', token);
-    await AsyncStorage.setItem('auth-user', JSON.stringify(user));
-    set({ user, token });
+  setAuth: async (user, token, refreshToken) => {
+    const current = useAuthStore.getState().user;
+
+    // 🛡️ ACCOUNT SWITCH GUARD: If logging into a different user account, clear old user profile cache!
+    if (current && user && String(current.id || current._id) !== String(user.id || user._id)) {
+      try {
+        const { useProfileStore } = await import('./profileStore');
+        await useProfileStore.getState().clearCache();
+      } catch (_) {}
+    }
+
+    const finalUser = user ? {
+      ...user,
+      anonymousPersona: user.anonymousPersona || (current && String(current.id || current._id) === String(user.id || user._id) ? current.anonymousPersona : undefined)
+    } : user;
+
+    // Update state FIRST for instant UI update!
+    set({ user: finalUser, token });
     socketService.connect(token);
+
+    // Then persist to storage in background, with error handling
+    try {
+      await AsyncStorage.setItem('auth-token', token);
+      await AsyncStorage.setItem('auth-user', JSON.stringify(finalUser));
+      if (refreshToken) {
+        await AsyncStorage.setItem('auth-refresh-token', refreshToken);
+      }
+    } catch (e) {
+    }
   },
 
   // Logout ke liye:
   logout: async () => {
-    await AsyncStorage.removeItem('auth-token');
-    await AsyncStorage.removeItem('auth-user');
+    // Update state FIRST!
     set({ user: null, token: null });
     socketService.disconnect();
+
+    // Clear profile store in-memory cache
+    try {
+      const { useProfileStore } = await import('./profileStore');
+      await useProfileStore.getState().clearCache();
+    } catch (_) {}
+
+    // Clear explore store cache
+    try {
+      const { useExploreStore } = await import('./exploreStore');
+      useExploreStore.getState().clearAllExploreCaches();
+    } catch (_) {}
+
+    // Clear storage in background with error handling
+    try {
+      await AsyncStorage.removeItem('auth-token');
+      await AsyncStorage.removeItem('auth-user');
+      await AsyncStorage.removeItem('auth-refresh-token');
+      await AsyncStorage.removeItem('profile_cache_reality');
+      await AsyncStorage.removeItem('profile_cache_ghost');
+      await AsyncStorage.removeItem('anufy-explore-storage');
+    } catch (e) {
+    }
   },
 
   // App open hone par ye check karta h ki user pehle se logged in tha ya nai (persistent state check).
   initializeAuth: async () => {
+    // If AsyncStorage is full, try to clear non-essential data first
+    const tryClearNonEssentialCache = async () => {
+      try {
+        // Get all keys first
+        const keys = await AsyncStorage.getAllKeys();
+        const keysToClear = keys.filter(key => 
+          !key.startsWith('auth-') // Keep auth keys only
+        );
+        if (keysToClear.length > 0) {
+          await AsyncStorage.multiRemove(keysToClear);
+        }
+      } catch (e) {
+      }
+    };
+
     try {
       const token = await AsyncStorage.getItem('auth-token');
       const userStr = await AsyncStorage.getItem('auth-user');
 
       if (token && userStr) {
         const localUser = JSON.parse(userStr);
+        // ✅ Instantly set user from local cache — no waiting
         set({ user: localUser, token, isLoading: false });
         socketService.connect(token);
 
-        // Fetch latest user data in background to sync (blocked_users, etc.)
-        try {
-          const { apiClient } = await import('../api/client');
-          const res = await apiClient.get('/users/me');
-          if (res.data) {
-            const updatedUser = { ...localUser, ...res.data };
-            set({ user: updatedUser });
-            await AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser));
+        // 🔄 Background sync — fetch latest user data WITHOUT blocking login
+        setTimeout(async () => {
+          try {
+            const { apiClient } = await import('../api/client');
+            const res = await apiClient.get('/users/me');
+            if (res.data) {
+              const updatedUser = { ...localUser, ...res.data };
+              set({ user: updatedUser });
+              // Save silently — don't block UI
+              AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser)).catch(() => {});
+            }
+          } catch (syncErr: any) {
+            if (
+              syncErr.status === 401 ||
+              syncErr.status === 403 ||
+              syncErr.status === 404 ||
+              syncErr.message?.includes('User not found') ||
+              syncErr.message?.includes('Invalid or expired token')
+            ) {
+              const { logout } = useAuthStore.getState();
+              await logout();
+            }
           }
-        } catch (syncErr) {
-          console.log('[authStore] Failed to sync latest user profile:', syncErr);
-        }
+        }, 0); // Fire immediately but off the render-blocking thread
       } else {
         set({ isLoading: false });
       }
     } catch (error) {
-      console.error('Error fetching auth state from storage:', error);
+      await tryClearNonEssentialCache();
       set({ isLoading: false });
     }
   },
 
   toggleAnonymousMode: async () => {
-    // Get latest snapshot
     const state = useAuthStore.getState();
     const user = state.user;
     const token = state.token;
-    
+
     if (!user || !token) return;
 
     try {
-      // Optimistic update
       const newMode = !user.isAnonymousMode;
-      const updatedUser = { ...user, isAnonymousMode: newMode };
-      
-      set({ user: updatedUser });
-      await AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser));
 
-      // Call API
-      const { apiClient } = await import('../api/client');
-      const res = await apiClient.post('/users/anonymous/toggle');
+      // 🚀 INSTANT OPTIMISTIC UI UPDATE
+      const { LayoutAnimation, Platform, UIManager } = require('react-native');
+      const isNewArch = !!((global as any).nativeFabricUIScheduler || (global as any).RN$Bridgeless);
+      if (Platform.OS === 'android' && !isNewArch && UIManager.setLayoutAnimationEnabledExperimental) {
+        UIManager.setLayoutAnimationEnabledExperimental(true);
+      }
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
-      if (res.data.success) {
-        // Use current store state for final merge (in case other things changed)
-        const currentContext = useAuthStore.getState().user;
-        const finalUser = {
-          ...(currentContext || user),
-          isAnonymousMode: res.data.isAnonymousMode !== undefined ? res.data.isAnonymousMode : newMode,
-          anonymousPersona: res.data.anonymousPersona || user.anonymousPersona
+      // Build local anonymous persona if needed
+      let persona = user.anonymousPersona;
+      if (newMode && (!persona || !persona.avatar || !persona.name)) {
+        const seed = user.username || user.id || 'ghost';
+        persona = {
+          name: `@ghost_${seed.substring(0, 6)}`,
+          username: `ghost_${seed.substring(0, 6)}`,
+          avatar: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(seed)}`,
         };
-        
-        set({ user: finalUser });
-        await AsyncStorage.setItem('auth-user', JSON.stringify(finalUser));
+      }
+
+      // Optimistically update local state
+      const optimisticUser = {
+        ...user,
+        isAnonymousMode: newMode,
+        ...(newMode && persona ? { anonymousPersona: persona } : {}),
+      };
+      set({ user: optimisticUser });
+      try { AsyncStorage.setItem('auth-user', JSON.stringify(optimisticUser)); } catch {}
+
+      const startTime = Date.now();
+
+      // Emit immediately for feed & chat to switch with cached data
+      DeviceEventEmitter.emit('mode_switched', { isAnonymous: newMode });
+
+      try {
+        const { performanceEngine } = await import('../engines/PerformanceEngine/PerformanceEngine');
+        performanceEngine.trackCacheAccess('Feed', true);
+        performanceEngine.addTimelineEntry(
+          newMode ? 'Ghost Mode Switched' : 'Normal Mode Switched',
+          Date.now() - startTime,
+          true
+        );
+      } catch (_) {}
+
+      // Chat store switch
+      try {
+        if (typeof useChatStore.getState().switchMode === 'function') {
+          useChatStore.getState().switchMode(newMode);
+        }
+        void useChatStore.getState().refreshConversations(newMode);
+      } catch (e) {
+      }
+
+      // 🔄 SINGLE ATOMIC API CALL: switch mode + get fresh bootstrap data
+      const targetMode = newMode ? 'anonymous' : 'normal';
+      const res = await apiClient.post('/bootstrap/switch-mode', { mode: targetMode });
+
+      if (res.data?.success) {
+        // Confirm final mode from server
+        const serverMode: boolean = res.data.newMode === 'anonymous';
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser && currentUser.isAnonymousMode !== serverMode) {
+          const finalUser = {
+            ...currentUser,
+            isAnonymousMode: serverMode,
+            anonymousPersona: optimisticUser.anonymousPersona,
+          };
+          set({ user: finalUser });
+          try { AsyncStorage.setItem('auth-user', JSON.stringify(finalUser)); } catch {}
+          DeviceEventEmitter.emit('mode_switched', { isAnonymous: serverMode });
+        }
+
+        // Push fresh screen data to bootstrap store
+        if (res.data.data) {
+          try {
+            useBootstrapStore.getState().setBootstrapData(res.data.data);
+          } catch (e) {
+          }
+        }
       }
     } catch (error) {
-      console.error('Error toggling anonymous mode:', error);
-      // Rollback to PREVIOUS state (not necessarily the one from start of function)
-      // but for simplicity we use the original 'user' snapshot
-      set({ user: user });
-      await AsyncStorage.setItem('auth-user', JSON.stringify(user));
+      // Rollback on API failure
+      set({ user });
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('mode_switched', { isAnonymous: user.isAnonymousMode });
     }
   },
 
@@ -141,7 +282,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     const updatedUser = { ...state.user, customReactions: reactions };
     set({ user: updatedUser });
-    await AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser));
+    // Persist in background, fail silently
+    try {
+      await AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser));
+    } catch (e) {
+    }
   },
 
   updateBlockedUsers: (targetId: string, isBlocked: boolean) => {
@@ -160,8 +305,10 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     const updatedUser = { ...user, blocked_users: blockedList };
     set({ user: updatedUser });
-    AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser)).catch((err) =>
-      console.error('Error saving updated blocked list to storage:', err)
-    );
+    // Persist in background, fail silently
+    try {
+      AsyncStorage.setItem('auth-user', JSON.stringify(updatedUser));
+    } catch (err) {
+    }
   },
 }));

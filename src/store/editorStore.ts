@@ -41,7 +41,7 @@ interface EditorProject {
   isMuted: boolean;
   selectedLayerId: string | null;
   activeFilter: number;
-  activeMusic: { url: string; volume: number; trimStart: number; trimEnd: number; duration: number } | null;
+  activeMusic: { url: string; volume: number; trimStart: number; trimEnd: number; duration: number; songName?: string; artist?: string; artworkUrl100?: string } | null;
   history: any[];
 }
 
@@ -58,7 +58,7 @@ interface EditorActions {
   calculateTimeline: () => void;
   selectLayer: (id: string | null) => void;
   setActiveFilter: (filter: number) => void;
-  setMusic: (music: { url: string; volume: number; trimStart?: number; trimEnd?: number; duration?: number } | null) => void;
+  setMusic: (music: { url: string; volume: number; trimStart?: number; trimEnd?: number; duration?: number; songName?: string; artist?: string; artworkUrl100?: string } | null) => void;
   updateMusicTrim: (updates: { trimStart?: number; trimEnd?: number }) => void;
   clearProject: () => void;
 }
@@ -141,6 +141,8 @@ export const useEditorStore = create<EditorProject & EditorActions>((set, get) =
       trimStart: 0, 
       trimEnd: music.duration || 30000, 
       duration: music.duration || 30000,
+      songName: music.songName || 'Unknown Song',
+      artist: music.artist || 'Unknown Artist',
       ...music 
     } : null 
   }),

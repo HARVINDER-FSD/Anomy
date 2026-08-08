@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, Platform, ActivityIndicator, SafeAreaView, Alert, StatusBar } from 'react-native';
-import { Video, ResizeMode, Audio } from 'expo-av';
+import { Audio } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { COLORS } from '@/src/theme/colors';
@@ -8,12 +9,16 @@ import { apiClient } from '@/src/api/client';
 import { scale, verticalScale, moderateScale, moderateFont } from '@/src/utils/responsive';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '@/src/store/authStore';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { useFeedStore } from '@/src/store/feedStore';
+import { useReelsStore } from '@/src/store/reelsStore';
+import { socketService } from '@/src/lib/socket';
+
 
 export default function PostEditorScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
-  const videoRef = useRef<Video>(null);
   const isAnonymous = !!user?.isAnonymousMode;
   
   const [caption, setCaption] = useState('');
@@ -40,6 +45,49 @@ export default function PostEditorScreen() {
   const musicUrl = params.musicUrl as string;
   const musicTrimStart = params.musicTrimStart ? parseInt(params.musicTrimStart as string) : 0;
   const musicVolume = params.musicVolume ? parseFloat(params.musicVolume as string) : 1;
+  const musicSongName = params.musicSongName as string;
+  const musicArtist = params.musicArtist as string;
+  const musicArtwork = params.musicArtwork as string;
+
+  const player = useVideoPlayer(mediaUri || '', p => {
+    p.loop = true;
+    p.muted = isMuted;
+  });
+
+  // Observe player status and loop within trim range
+  useEffect(() => {
+    if (mediaType !== 'video' || !player) return;
+    
+    const statusSub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay' && trimStart > 0) {
+        player.currentTime = trimStart / 1000;
+      }
+    });
+
+    const timeSub = player.addListener('timeUpdate', (event) => {
+      const posMs = event.currentTime * 1000;
+      if (trimEnd > 0 && posMs >= trimEnd) {
+        player.currentTime = trimStart / 1000;
+      }
+    });
+
+    const endSub = player.addListener('playToEnd', () => {
+      if (trimStart > 0) {
+        player.currentTime = trimStart / 1000;
+        player.play();
+      } else {
+        setIsPlaying(false);
+      }
+    });
+
+    return () => {
+      statusSub.remove();
+      timeSub.remove();
+      endSub.remove();
+    };
+  }, [player, mediaType, trimStart, trimEnd]);
+
+
 
   // 🎵 Load Music if exists
   useEffect(() => {
@@ -61,20 +109,22 @@ export default function PostEditorScreen() {
       );
       setSound(newSound);
     } catch (e) {
-      console.warn("Failed to load preview music:", e);
     }
   };
 
   const togglePlayback = async () => {
-    if (isPlaying) {
-      await videoRef.current?.pauseAsync();
-      await sound?.pauseAsync();
-    } else {
-      // Sync positions before play
-      await sound?.setPositionAsync(musicTrimStart);
-      await videoRef.current?.setPositionAsync(trimStart);
-      await videoRef.current?.playAsync();
-      await sound?.playAsync();
+    try {
+      if (isPlaying) {
+        player.pause();
+        await sound?.pauseAsync().catch(() => {});
+      } else {
+        // Sync positions before play
+        await sound?.setPositionAsync(musicTrimStart).catch(() => {});
+        player.currentTime = trimStart / 1000;
+        player.play();
+        await sound?.playAsync().catch(() => {});
+      }
+    } catch (e) {
     }
     setIsPlaying(!isPlaying);
   };
@@ -129,6 +179,18 @@ export default function PostEditorScreen() {
       formData.append('title', caption); // Backend reels expects title
       formData.append('description', caption); // and description
       formData.append('is_anonymous', isAnonymous ? 'true' : 'false');
+
+      // Add music metadata if available (check for non-empty strings)
+      if ((musicSongName && musicSongName.trim()) || (musicArtist && musicArtist.trim())) {
+        const musicData = {
+          song_name: (musicSongName && musicSongName.trim()) ? musicSongName : 'Unknown Song',
+          artist: (musicArtist && musicArtist.trim()) ? musicArtist : 'Unknown Artist',
+          ...(musicArtwork ? { cover_image: musicArtwork } : {}),
+        };
+        formData.append('music', JSON.stringify(musicData));
+        formData.append('music_info', JSON.stringify(musicData));
+      }
+
       
       const isReel = params.postType === 'shots' || (mediaType === 'video' && params.postType !== 'post');
 
@@ -149,7 +211,7 @@ export default function PostEditorScreen() {
             
             // @ts-ignore
             formData.append(isReel ? 'video' : 'media', {
-              uri: Platform.OS === 'android' ? mediaUri : mediaUri.replace('file://', ''),
+              uri: mediaUri,
               name: filename,
               type: mimeType,
             });
@@ -163,20 +225,67 @@ export default function PostEditorScreen() {
       }
 
       const endpoint = isReel ? '/reels' : '/posts';
+
       
-      await apiClient.post(endpoint, formData, {
+      const res = await apiClient.post(endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+
+      const newPostObj = res.data?.data?.post || res.data?.post || res.data?.data?.reel || res.data?.reel || res.data;
+
+      // 🚀 CACHE INJECTION SYSTEM: Inject new posts/reels directly into stores for instant zero-server load display!
+      if (newPostObj) {
+        // Guarantee author data is fully present even for private/protected users!
+        if (!newPostObj.author && !newPostObj.user) {
+          newPostObj.author = {
+            _id: user?.id || user?._id,
+            id: user?.id || user?._id,
+            username: user?.username || 'You',
+            avatar: user?.avatar || (user as any)?.profilePicture || '',
+            avatar_url: user?.avatar || (user as any)?.profilePicture || '',
+            is_verified: !!(user as any)?.isPremium,
+          };
+        }
+
+        if (isReel) {
+          // Add to preloadedReels store
+          const currentReels = useReelsStore.getState().preloadedReels || [];
+          useReelsStore.getState().setPreloadedReels([newPostObj, ...currentReels]);
+        } else {
+          // Add to normal or anonymous Feed caches
+          if (isAnonymous) {
+            const currentAnon = useFeedStore.getState().cachedAnonymousPosts || [];
+            useFeedStore.getState().setCachedAnonymousPosts([newPostObj, ...currentAnon]);
+          } else {
+            const currentNormal = useFeedStore.getState().cachedPosts || [];
+            useFeedStore.getState().setCachedPosts([newPostObj, ...currentNormal]);
+          }
+        }
+        // Emit via socket to broadcast real-time updates to existing followers
+        socketService.socket?.emit(isReel ? 'shot:create' : 'post:create', {
+          post: newPostObj,
+          isAnonymous
+        });
+
+        // 🚀 Emit locally to update feed and profile tabs instantly!
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit(isReel ? 'reel:created:local' : 'post:created:local', newPostObj);
+
+      }
 
       Alert.alert(
         isAnonymous ? "Echo Sent" : "Success", 
         isAnonymous ? "Your shadow post is now in the void." : `${isReel ? 'Shot' : 'Post'} shared successfully!`
       );
       
-      router.replace(isAnonymous ? '/(tabs)/shots' : '/(tabs)');
+      // 🛡️ STRONG BOUNDARY: After posting, force a refresh of the correct feed
+      if (isAnonymous) {
+        router.replace('/(tabs)/explore'); // Or wherever anonymous feed lives
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (error: any) {
-      console.error("Post error:", error);
-      const errorMessage = error.data?.message || error.message || `Failed to share ${mediaType === 'video' ? 'shot' : 'post'}.`;
+      const errorMessage = error.response?.data?.error || error.response?.data?.message || error.data?.message || error.message || `Failed to share ${mediaType === 'video' ? 'shot' : 'post'}.`;
       Alert.alert("Error", errorMessage);
     } finally {
       setLoading(false);
@@ -215,21 +324,11 @@ export default function PostEditorScreen() {
         <View style={styles.mediaPreview}>
           {mediaType === 'video' ? (
             <View style={styles.videoContainer}>
-              <Video
-                ref={videoRef}
-                source={{ uri: mediaUri }}
+              <VideoView
+                player={player}
                 style={styles.previewImage}
-                resizeMode={ResizeMode.COVER}
-                isLooping
-                isMuted={isMuted}
-                positionMillis={trimStart}
-                onPlaybackStatusUpdate={(status: any) => {
-                  if (status.didJustFinish) setIsPlaying(false);
-                  // Loop within trim range if possible
-                  if (trimEnd > 0 && status.positionMillis >= trimEnd) {
-                    videoRef.current?.setPositionAsync(trimStart);
-                  }
-                }}
+                contentFit="cover"
+                nativeControls={false}
               />
               <TouchableOpacity style={styles.playOverlay} onPress={togglePlayback}>
                 <Ionicons 

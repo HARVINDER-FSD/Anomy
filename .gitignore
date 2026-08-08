@@ -31,7 +31,12 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
 .env*.local
+credentials.json
+tsc_output.txt
+scratch/
 
 # typescript
 *.tsbuildinfo

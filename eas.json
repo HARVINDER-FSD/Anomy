@@ -12,6 +12,7 @@
       },
       "env": {
         "EXPO_DEBUG": "true",
+        "EXPO_PUBLIC_USE_LOCAL_API": "true",
         "EXPO_PUBLIC_API_URL": "http://localhost:5001",
         "EXPO_PUBLIC_AGORA_APP_ID": "373fa7954c3940d58159be06afc41e46"
       }
@@ -24,16 +25,18 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://mybackenda.onrender.com",
+        "EXPO_PUBLIC_USE_LOCAL_API": "false",
         "EXPO_PUBLIC_AGORA_APP_ID": "373fa7954c3940d58159be06afc41e46"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://mybackenda.onrender.com",
+        "EXPO_PUBLIC_USE_LOCAL_API": "false",
         "EXPO_PUBLIC_AGORA_APP_ID": "373fa7954c3940d58159be06afc41e46"
       }
     }

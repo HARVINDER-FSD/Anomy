@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, SafeAreaView, 
   Dimensions, StatusBar, Platform, Image, ActivityIndicator, 
   Alert, PanResponder, Animated, ScrollView, Modal, TextInput,
-  PanResponderGestureState, GestureResponderEvent, Vibration, FlatList
+  PanResponderGestureState, GestureResponderEvent, Vibration, FlatList, BackHandler
 } from 'react-native';
 import { Camera, CameraView, FlashMode, CameraType } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,18 +12,41 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path, G as SvgGroup } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
-import { Audio, Video, ResizeMode } from 'expo-av';
+import * as ExpoAV from 'expo-av';
 import { useLocalSearchParams } from 'expo-router';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { scale, verticalScale } from '@/src/utils/responsive';
+
+interface CreateStoryVideoItemProps {
+  uri: string;
+  style: any;
+}
+
+const CreateStoryVideoItem = ({ uri, style }: CreateStoryVideoItemProps) => {
+  const player = useVideoPlayer(uri, p => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={style}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+};
 import { apiClient } from '@/src/api/client';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const CANVAS_WIDTH = SCREEN_WIDTH; 
-const CANVAS_HEIGHT = SCREEN_HEIGHT * 0.83; 
+const CANVAS_HEIGHT = SCREEN_HEIGHT; 
 const ROUNDING = 0;
 
-const TRASH_Y = SCREEN_HEIGHT - 180;
+const TRASH_Y = SCREEN_HEIGHT - 110;
 const TRASH_X = SCREEN_WIDTH / 2;
 
 const getFontFamily = (f: string | undefined) => {
@@ -130,7 +153,7 @@ const SubElementRender = ({ element }: { element: StoryElement }) => {
       <>
          {element.type === 'image' && !isVideo && <Image source={{ uri: resolveMediaUrl(element.uri) }} style={element.isBase ? styles.imgBase : styles.imgExtra} resizeMode="cover" />}
          {element.type === 'image' && isVideo && (
-            <Video source={{ uri: resolveMediaUrl(element.uri!) }} style={element.isBase ? styles.imgBase : styles.imgExtra} resizeMode={ResizeMode.COVER} shouldPlay isLooping />
+            <CreateStoryVideoItem uri={resolveMediaUrl(element.uri!)} style={element.isBase ? styles.imgBase : styles.imgExtra} />
          )}
          {element.type === 'text' && (
             <View style={[
@@ -208,9 +231,9 @@ const InteractiveLayer = ({
             const touches = e.nativeEvent.touches;
             if (touches.length === 1 && !_isPinching.current) {
                const distToTrash = Math.sqrt(Math.pow(g.moveX - TRASH_X, 2) + Math.pow(g.moveY - TRASH_Y, 2));
-               if (!element.isBase && distToTrash < 100) {
+               if (!element.isBase && distToTrash < 70) {
                   if (!(pan as any)._near) { (pan as any)._near = true; Vibration.vibrate(10); }
-                  const pull = Math.max(0.1, distToTrash / 110);
+                  const pull = Math.max(0.1, distToTrash / 80);
                   scale.setValue(element.scale * pull);
                   opacity.setValue(pull);
                } else {
@@ -320,10 +343,40 @@ export default function AnuFyNeonEditorPro() {
 
   const [searchMusic, setSearchMusic] = useState('');
   const [songs, setSongs] = useState<any[]>([]);
+  const [activeMusicTab, setActiveMusicTab] = useState<'trending' | 'recent'>('trending');
+  const [trendingSongs, setTrendingSongs] = useState<any[]>([]);
+  const [recentSongs, setRecentSongs] = useState<any[]>([]);
   const [isLoadingMusic, setIsLoadingMusic] = useState(false);
-  const player = useRef<Audio.Sound | null>(null);
+  const player = useRef<ExpoAV.Audio.Sound | null>(null);
   const musicReqId = useRef(0);
   const [themeIdx, setThemeIdx] = useState(0);
+
+  const fetchTabSongs = async (tab: 'trending' | 'recent') => {
+    setIsLoadingMusic(true);
+    try {
+      const term = tab === 'trending' ? 'top hits' : 'latest hits';
+      const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&limit=15`);
+      const data = await res.json();
+      if (tab === 'trending') {
+        setTrendingSongs(data.results || []);
+      } else {
+        setRecentSongs(data.results || []);
+      }
+    } catch(e) {
+    } finally {
+      setIsLoadingMusic(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTool === 'music' && searchMusic.trim().length === 0) {
+      if (activeMusicTab === 'trending' && trendingSongs.length === 0) {
+        fetchTabSongs('trending');
+      } else if (activeMusicTab === 'recent' && recentSongs.length === 0) {
+        fetchTabSongs('recent');
+      }
+    }
+  }, [activeTool, activeMusicTab, searchMusic]);
 
   const cinematicThemes = [ 
     { name: 'Natural', color: 'transparent', preview: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=200' }, 
@@ -376,7 +429,7 @@ export default function AnuFyNeonEditorPro() {
     }
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
+      const { sound } = await ExpoAV.Audio.Sound.createAsync(
         { uri: song.previewUrl }, 
         { shouldPlay: true, isLooping: true }
       );
@@ -397,7 +450,6 @@ export default function AnuFyNeonEditorPro() {
         await sound.unloadAsync();
       }
     } catch(err) {
-      console.error('Audio select error:', err);
     } 
     setActiveTool(null); 
     setSearchMusic('');
@@ -415,12 +467,13 @@ export default function AnuFyNeonEditorPro() {
       } else {
         // Search users when query is provided
         const res = await apiClient.get(`/search?q=${q}&limit=10`);
-        if (res.data && res.data.users) {
+        if (res.data && Array.isArray(res.data)) {
+          setFoundUsers(res.data);
+        } else if (res.data && res.data.users) {
           setFoundUsers(res.data.users);
         }
       }
     } catch (e) {
-      console.error('Fetch users error:', e);
     } finally {
       setIsSearchingUsers(false);
     }
@@ -429,7 +482,6 @@ export default function AnuFyNeonEditorPro() {
   const addMention = (user: any) => {
     const userId = user.id || user._id || user.user_id;
     if (!userId) {
-       console.error('No userId found for user:', user);
        return;
     }
 
@@ -462,7 +514,6 @@ export default function AnuFyNeonEditorPro() {
         setGiphyStickers(res.data.data);
       }
     } catch (e) {
-      console.error('Fetch stickers error:', e);
     } finally {
       setIsLoadingStickers(false);
     }
@@ -560,19 +611,19 @@ export default function AnuFyNeonEditorPro() {
                         const currentId = musicReqId.current;
                         try {
                             if (player.current) { await player.current.unloadAsync(); }
-                            const { sound } = await Audio.Sound.createAsync(
+                            const { sound } = await ExpoAV.Audio.Sound.createAsync(
                                 { uri: originalMusic.previewUrl },
                                 { shouldPlay: true, isLooping: true }
                             );
                             if (currentId === musicReqId.current) { player.current = sound; } else { await sound.unloadAsync(); }
-                        } catch (err) { console.error("Failed to play reshared music", err); }
+                        } catch (err) {  }
                     };
                     playMusic();
                 }
 
                 setMode('edit');
              }
-          } catch (e) { console.error('Reshare fetch error:', e); }
+          } catch (e) {  }
        }
     };
     checkReshare();
@@ -636,12 +687,41 @@ export default function AnuFyNeonEditorPro() {
     }
   }, [postId, mediaUrl, mediaType]);
 
+  useEffect(() => {
+    const onBackPress = () => {
+      if (mode === 'edit' && elements.length > 0) {
+        setShowDiscardModal(true);
+        return true;
+      }
+      return false;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => {
+      backHandler.remove();
+    };
+  }, [mode, elements.length]);
+
   useEffect(() => { return () => { if (player.current) player.current.unloadAsync(); }; }, []);
 
   const handleCapture = async () => {
     if (cameraRef.current) {
-      const p = await cameraRef.current.takePictureAsync({ quality: 0.9 });
-      setElements([{ id: Date.now(), type: 'image', uri: p.uri, x: 0, y: 0, scale: 1, rotate: 0, isBase: true }]); setMode('edit');
+      try {
+        const p = await cameraRef.current.takePictureAsync({ quality: 1 });
+        if (!p) return;
+        let finalUri = p.uri;
+        if (facing === 'front') {
+          const manipulated = await ImageManipulator.manipulateAsync(
+            p.uri,
+            [{ flip: ImageManipulator.FlipType.Horizontal }],
+            { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          finalUri = manipulated.uri;
+        }
+        setElements([{ id: Date.now(), type: 'image', uri: finalUri, x: 0, y: 0, scale: 1, rotate: 0, isBase: true }]);
+        setMode('edit');
+      } catch (err) {
+        Alert.alert("Capture Error", "Could not process captured image.");
+      }
     }
   };
 
@@ -867,12 +947,14 @@ export default function AnuFyNeonEditorPro() {
       <StatusBar barStyle="light-content" translucent />
       
       {mode === 'capture' ? (
-        <View style={StyleSheet.absoluteFill}>
-           <CameraView style={StyleSheet.absoluteFill} ref={cameraRef} flash={flash} facing={facing} />
-           <View style={[StyleSheet.absoluteFill, { backgroundColor: cinematicThemes[themeIdx].color, pointerEvents: 'none' }]} />
-           <SafeAreaView style={styles.captureUI}>
+        <View style={styles.editorRoot}>
+           <View style={styles.canvasContainer}>
+             <CameraView style={StyleSheet.absoluteFill} ref={cameraRef} flash={flash} facing={facing} />
+             <View style={[StyleSheet.absoluteFill, { backgroundColor: cinematicThemes[themeIdx].color, pointerEvents: 'none' }]} />
+           </View>
+           <SafeAreaView style={[styles.captureUI, StyleSheet.absoluteFill]} pointerEvents="box-none">
               <View style={styles.topNav}><TouchableOpacity onPress={()=>router.back()} style={styles.iconBtn}><Ionicons name="close" size={30} color="#FFF" /></TouchableOpacity><TouchableOpacity onPress={()=>setFlash(f=>f==='on'?'off':'on')} style={[styles.iconBtn, flash==='on'&&{backgroundColor:'#FFD700'}]}><Ionicons name={flash==='on'?"flash":"flash-off"} size={22} color={flash==='on'?"#000":"#FFF"}/></TouchableOpacity></View>
-              <View style={{flex:1}} />
+              <View style={{flex:1}} pointerEvents="none" />
               <View style={styles.filterBar}>
                  <ScrollView ref={filterScrollRef} horizontal showsHorizontalScrollIndicator={false} snapToInterval={90} decelerationRate="fast" onScroll={(e)=>{let i=Math.round(e.nativeEvent.contentOffset.x/90); if(i!==themeIdx&&i>=0&&i<cinematicThemes.length){setThemeIdx(i); Vibration.vibrate(5);}}} scrollEventThrottle={16} contentContainerStyle={{paddingHorizontal:SCREEN_WIDTH/2-45}}>
                     {cinematicThemes.map((f, i) => (
@@ -975,28 +1057,51 @@ export default function AnuFyNeonEditorPro() {
           {showTrash && (
              <View style={styles.trashCircleContainer}>
                 <BlurView intensity={20} tint="dark" style={styles.trashCircle}>
-                   <Ionicons name="trash" size={36} color={COLORS.error} />
+                   <Ionicons name="trash" size={24} color={COLORS.error} />
                 </BlurView>
              </View>
           )}
 
-          <Modal visible={activeTool === 'music'} animationType="slide" transparent>
+          <Modal visible={activeTool === 'music'} animationType="slide" transparent={false}>
              <View style={styles.mFull}>
                 <View style={styles.mTRow}>
                    <Text style={styles.mT}>Music Library</Text>
-                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#FFF" /></TouchableOpacity>
+                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#000" /></TouchableOpacity>
                 </View>
-                <TextInput placeholder="Search songs..." placeholderTextColor="#666" style={styles.mInp} value={searchMusic} onChangeText={(t)=>{setSearchMusic(t); fetchMusic(t);}} />
+                <TextInput placeholder="Search songs..." placeholderTextColor="#999" style={styles.mInp} value={searchMusic} onChangeText={(t)=>{setSearchMusic(t); fetchMusic(t);}} />
+                
+                {searchMusic.trim().length === 0 && (
+                   <View style={styles.musicTabContainer}>
+                      <TouchableOpacity 
+                         style={[styles.musicTab, activeMusicTab === 'trending' && styles.activeMusicTab]} 
+                         onPress={() => setActiveMusicTab('trending')}
+                      >
+                         <Text style={[styles.musicTabText, activeMusicTab === 'trending' && styles.activeMusicTabText]}>Trending</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                         style={[styles.musicTab, activeMusicTab === 'recent' && styles.activeMusicTab]} 
+                         onPress={() => setActiveMusicTab('recent')}
+                      >
+                         <Text style={[styles.musicTabText, activeMusicTab === 'recent' && styles.activeMusicTabText]}>Recent</Text>
+                      </TouchableOpacity>
+                   </View>
+                )}
+
                 {isLoadingMusic ? (
                    <View style={{flex: 1, justifyContent: 'center'}}><ActivityIndicator color={COLORS.secondary} size="large" /></View>
                 ) : (
-                   <FlatList data={songs} keyExtractor={(i)=>i.trackId} renderItem={({item})=>(
-                      <TouchableOpacity style={styles.sRow} onPress={()=>selectSong(item)}>
-                         <Image source={{uri:item.artworkUrl100}} style={styles.sArt} />
-                         <View style={styles.sInfo}><Text style={styles.sN}>{item.trackName}</Text><Text style={styles.sA}>{item.artistName}</Text></View>
-                         <Ionicons name="play-circle" size={30} color={COLORS.secondary} />
-                      </TouchableOpacity>
-                   )} />
+                    <FlatList 
+                       data={searchMusic.trim().length > 0 ? songs : (activeMusicTab === 'trending' ? trendingSongs : recentSongs)} 
+                      keyExtractor={(item)=>String(item.trackId || item.id || Math.random())} 
+                      showsVerticalScrollIndicator={false}
+                      renderItem={({item})=>(
+                         <TouchableOpacity style={styles.sRow} onPress={()=>selectSong(item)}>
+                            <Image source={{uri:item.artworkUrl100}} style={styles.sArt} />
+                            <View style={styles.sInfo}><Text style={styles.sN}>{item.trackName}</Text><Text style={styles.sA}>{item.artistName}</Text></View>
+                            <Ionicons name="play-circle" size={30} color={COLORS.secondary} />
+                         </TouchableOpacity>
+                      )} 
+                   />
                 )}
              </View>
           </Modal>
@@ -1018,15 +1123,15 @@ export default function AnuFyNeonEditorPro() {
              </View>
           </Modal>
 
-          <Modal visible={activeTool === 'mention'} animationType="slide" transparent>
+          <Modal visible={activeTool === 'mention'} animationType="slide" transparent={false}>
              <View style={styles.stickerFull}>
                 <View style={styles.mTRow}>
                    <Text style={styles.mT}>Mention User</Text>
-                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#FFF" /></TouchableOpacity>
+                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#000" /></TouchableOpacity>
                 </View>
                 <TextInput 
                    placeholder="Type username..." 
-                   placeholderTextColor="#666" 
+                   placeholderTextColor="#999" 
                    style={styles.stickerSearchInp}
                    value={userSearch}
                    onChangeText={setUserSearch}
@@ -1037,6 +1142,7 @@ export default function AnuFyNeonEditorPro() {
                    <FlatList 
                       data={foundUsers} 
                       keyExtractor={(i)=>i.id || i._id} 
+                      showsVerticalScrollIndicator={false}
                       renderItem={({item})=>(
                          <TouchableOpacity style={styles.sRow} onPress={()=>addMention(item)}>
                             <Image source={{uri: item.avatar || item.avatar_url}} style={styles.sArt} />
@@ -1052,16 +1158,16 @@ export default function AnuFyNeonEditorPro() {
              </View>
           </Modal>
 
-          <Modal visible={activeTool === 'sticker'} animationType="slide" transparent>
+          <Modal visible={activeTool === 'sticker'} animationType="slide" transparent={false}>
              <View style={styles.stickerFull}>
                 <View style={styles.mTRow}>
                    <Text style={styles.mT}>GIPHY Stickers</Text>
-                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#FFF" /></TouchableOpacity>
+                   <TouchableOpacity onPress={()=>setActiveTool(null)}><Ionicons name="close-circle" size={32} color="#000" /></TouchableOpacity>
                 </View>
                 
                 <TextInput 
                    placeholder="Search animated stickers..." 
-                   placeholderTextColor="#666" 
+                   placeholderTextColor="#999" 
                    style={styles.stickerSearchInp}
                    value={stickerSearch}
                    onChangeText={(t) => {
@@ -1077,6 +1183,7 @@ export default function AnuFyNeonEditorPro() {
                       data={giphyStickers} 
                       keyExtractor={(i)=>i.id} 
                       numColumns={3}
+                      showsVerticalScrollIndicator={false}
                       columnWrapperStyle={{gap: 15, marginBottom: 15}}
                       renderItem={({item})=>(
                          <TouchableOpacity style={{ flex: 1, height: 110 }} onPress={()=>addSticker(item.url)}>
@@ -1088,7 +1195,7 @@ export default function AnuFyNeonEditorPro() {
              </View>
           </Modal>
 
-          <Modal visible={showDiscardModal} transparent animationType="slide"><View style={styles.alertO}><BlurView intensity={95} tint="dark" style={styles.alertB}><Text style={styles.alertT}>Discard Story?</Text><View style={styles.alertActs}><TouchableOpacity style={styles.alertD} onPress={onDiscard}><Text style={styles.alertDT}>Discard</Text></TouchableOpacity><TouchableOpacity style={styles.alertG} onPress={()=>setShowDiscardModal(false)}><Text style={styles.alertGT}>Keep Editing</Text></TouchableOpacity></View></BlurView></View></Modal>
+          <Modal visible={showDiscardModal} transparent animationType="fade"><View style={styles.alertO}><View style={styles.alertB}><Text style={styles.alertT}>Discard Story?</Text><View style={styles.alertActs}><TouchableOpacity style={styles.alertG} onPress={()=>setShowDiscardModal(false)}><Text style={styles.alertGT}>Keep Editing</Text></TouchableOpacity><TouchableOpacity style={styles.alertD} onPress={onDiscard}><Text style={styles.alertDT}>Discard</Text></TouchableOpacity></View></View></View></Modal>
         </View>
       )}
     </View>
@@ -1109,16 +1216,18 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 40, paddingHorizontal: 30 },
   storyModeTxt: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 2 },
   editorRoot: { flex: 1, backgroundColor: '#000' },
-  canvasContainer: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, backgroundColor: '#111', borderRadius: 0, overflow: 'hidden', marginTop: 10, zIndex: 1 },
+  canvasContainer: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, backgroundColor: '#111', borderRadius: 0, overflow: 'hidden', marginTop: 0, zIndex: 1 },
   imgBase: { width: '100%', height: '100%' },
-  imgExtra: { width: 200, height: 280, borderRadius: 0 },
+  imgExtra: { width: scale(200), height: verticalScale(280), borderRadius: 0 },
+  imgGrid: { width: (SCREEN_WIDTH - 8) / 3, height: (SCREEN_WIDTH - 8) / 3, margin: 1, backgroundColor: '#333' },
   textWrap: { minWidth: 60, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 12 },
   textItem: { fontSize: 42, fontWeight: '900', textAlign: 'center' },
   mentionRow: { backgroundColor: COLORS.secondary, paddingHorizontal: 15, paddingVertical: 10, borderRadius: 30, flexDirection: 'row', alignItems: 'center' },
   mentionAvatar: { width: 32, height: 32, borderRadius: 16, marginRight: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   mentionSymbol: { color: '#FFF', fontWeight: '900', fontSize: 18, marginRight: 2 },
   mentionLabel: { color: '#FFF', fontWeight: '800', fontSize: 16 },
-  musicCard: { width: 220, height: 75, borderRadius: 15, flexDirection: 'row', alignItems: 'center', padding: 10, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  musicControls: { position: 'absolute', bottom: 120, alignSelf: 'center', alignItems: 'center' },
+  musicCard: { width: scale(220), height: verticalScale(75), borderRadius: 15, flexDirection: 'row', alignItems: 'center', padding: 10, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   artThumb: { width: 55, height: 55, borderRadius: 8 },
   artMeta: { flex: 1, marginLeft: 12 },
   artN: { color: '#FFF', fontWeight: '900', fontSize: 14 },
@@ -1180,17 +1289,22 @@ const styles = StyleSheet.create({
   colorPlates: { paddingHorizontal: 15, paddingVertical: 10, gap: 12, alignItems: 'center' },
   plate: { width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: '#333' },
   plateActive: { borderColor: '#FFF', transform: [{ scale: 1.15 }] },
-  trashCircleContainer: { position: 'absolute', bottom: 150, alignSelf: 'center', zIndex: 11000 },
-  trashCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: COLORS.error },
-  mFull: { flex: 1, padding: 30, paddingTop: 60, zIndex: 12000 },
+  trashCircleContainer: { position: 'absolute', bottom: 80, alignSelf: 'center', zIndex: 11000 },
+  trashCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: COLORS.error },
+  mFull: { flex: 1, padding: 30, paddingTop: Platform.OS === 'ios' ? 60 : 40, zIndex: 12000, backgroundColor: '#FFFFFF' },
   mTRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  mT: { color: '#FFF', fontSize: 26, fontWeight: '900' },
-  mInp: { backgroundColor: 'rgba(255,255,255,0.1)', height: 56, borderRadius: 15, paddingHorizontal: 20, color: '#FFF', marginBottom: 20 },
+  mT: { color: '#000000', fontSize: 26, fontWeight: '900' },
+  mInp: { backgroundColor: '#F3F4F6', height: 56, borderRadius: 15, paddingHorizontal: 20, color: '#000000', marginBottom: 20 },
   sRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   sArt: { width: 55, height: 55, borderRadius: 8 },
   sInfo: { flex: 1, marginLeft: 15 },
-  sN: { color: '#FFF', fontWeight: '800' },
-  sA: { color: '#888' },
+  sN: { color: '#000000', fontWeight: '800', fontSize: 16 },
+  sA: { color: '#666666', fontSize: 13, marginTop: 2 },
+  musicTabContainer: { flexDirection: 'row', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  musicTab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  activeMusicTab: { borderBottomColor: COLORS.secondary },
+  musicTabText: { fontSize: 16, fontWeight: '600', color: '#6B7280' },
+  activeMusicTabText: { color: COLORS.secondary, fontWeight: '800' },
   txtOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', zIndex: 12000 },
   txtHdr: { flexDirection: 'row', justifyContent: 'space-between', padding: 25 },
   txtDone: { color: COLORS.secondary, fontSize: 22, fontWeight: '900' },
@@ -1200,17 +1314,17 @@ const styles = StyleSheet.create({
   cDot: { width: 35, height: 35, borderRadius: 17.5, borderWidth: 2, borderColor: '#FFF' },
   cDotA: { transform: [{ scale: 1.2 }], borderColor: COLORS.secondary },
   alertO: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 13000 },
-  alertB: { width: '80%', padding: 30, borderRadius: 30, overflow: 'hidden', alignItems: 'center' },
-  alertT: { color: '#FFF', fontSize: 22, fontWeight: '900', marginBottom: 25 },
+  alertB: { width: scale(280), padding: 20, borderRadius: 20, backgroundColor: '#FFF', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
+  alertT: { color: '#000', fontSize: 18, fontWeight: '800', marginBottom: 20 },
   alertActs: { width: '100%', gap: 10 },
-  alertD: { height: 55, borderRadius: 27.5, backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'center' },
-  alertG: { height: 55, borderRadius: 27.5, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  alertDT: { color: '#FFF', fontWeight: '900' },
-  alertGT: { color: '#FFF', fontWeight: '800' },
+  alertD: { height: 44, borderRadius: 22, backgroundColor: 'rgba(255,59,48,0.1)', justifyContent: 'center', alignItems: 'center' },
+  alertG: { height: 44, borderRadius: 22, backgroundColor: COLORS.secondary, justifyContent: 'center', alignItems: 'center' },
+  alertDT: { color: '#FF3B30', fontWeight: '800', fontSize: 15 },
+  alertGT: { color: '#FFF', fontWeight: '800', fontSize: 15 },
   txtOpt: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
   stickerImg: { width: 140, height: 140 },
-  stickerFull: { flex: 1, padding: 25, paddingTop: 60, zIndex: 12000, backgroundColor: '#121212' },
-  stickerSearchInp: { backgroundColor: 'rgba(255,255,255,0.1)', height: 50, borderRadius: 15, paddingHorizontal: 20, color: '#FFF', marginBottom: 20 },
+  stickerFull: { flex: 1, padding: 25, paddingTop: Platform.OS === 'ios' ? 60 : 40, zIndex: 12000, backgroundColor: '#FFFFFF' },
+  stickerSearchInp: { backgroundColor: '#F3F4F6', height: 50, borderRadius: 15, paddingHorizontal: 20, color: '#000000', marginBottom: 20 },
   giphyItem: { flex: 1, height: 110, justifyContent: 'center', alignItems: 'center' },
   giphyPreview: { width: '100%', height: '100%' },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Platform, StatusBar, ScrollView, Alert, Dimensions, Image, TextInput, ActivityIndicator, Vibration, PanResponder } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
@@ -7,6 +7,8 @@ import { useEditorStore } from '../../src/store/editorStore';
 import { TimelinePreview } from '../../src/components/TimelinePreview';
 import { ExporterService } from '../../src/services/ExporterService';
 import { COLORS } from '../../src/theme/colors';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -15,7 +17,7 @@ const { width, height } = Dimensions.get('window');
  * Follows the 70/10/20 Layout architecture.
  */
 const TikTokEditorScreen = () => {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { 
      clips, layers, addClip, addLayer, setPlaying, setCurrentTime, isPlaying, totalDuration, 
      setActiveFilter, setMusic, currentTime, selectLayer, updateLayer, selectedLayerId, activeFilter, activeMusic,
@@ -193,7 +195,6 @@ const TikTokEditorScreen = () => {
       const data = await res.json();
       setMusicList(data.results || []);
     } catch (e) {
-      console.error('Music search failed', e);
     } finally {
       setIsLoadingMusic(false);
     }
@@ -233,16 +234,19 @@ const TikTokEditorScreen = () => {
     setShowStickers(false);
   };
 
-  const onAddMusic = (url: string) => {
-    console.log('[MusicSelect] Tapped Preview URL:', url);
+  const onAddMusic = (song: any) => {
+    const url = song.previewUrl || song.preview_url;
+    const songName = song.trackName || song.track_name || 'Unknown Song';
+    const artist = song.artistName || song.artist_name || 'Unknown Artist';
+    
     if (!url) {
       Alert.alert('Selection Error', 'This track preview is currently unavailable.');
       return;
     }
-    setMusic({ url, volume: 1.0 });
+    setMusic({ url, volume: 1.0, songName, artist, artworkUrl100: song.artworkUrl100 || song.artworkUrl60 || '' });
     Vibration.vibrate(10); 
     setShowMusic(false);
-    Alert.alert('Soundtrack Locked', '30-second preview added to your track!');
+    Alert.alert('Soundtrack Locked', `${songName} by ${artist} added to your track!`);
   };
 
   const cycleFilter = () => {
@@ -256,6 +260,7 @@ const TikTokEditorScreen = () => {
      
      setIsExporting(true);
      try {
+       
        // 🚀 Start Export (Hybrid: calls server-side FFmpeg if possible)
        const finalUri = await ExporterService.startExport();
        
@@ -265,22 +270,28 @@ const TikTokEditorScreen = () => {
        }
 
        // 🚀 Navigate to create screen with the final rendered video
+       const params = {
+         mediaUri: finalUri,
+         mediaType: 'video',
+         postType: 'shots',
+         // We pass these for metadata/fallback, but finalUri is already rendered
+         trimStart: Math.floor(clips[0].trimStart).toString(),
+         trimEnd: Math.floor(clips[0].trimEnd).toString(),
+         isMuted: isMuted ? 'true' : 'false',
+         musicUrl: activeMusic?.url || '',
+         musicTrimStart: activeMusic?.trimStart?.toString() || '0',
+         musicVolume: activeMusic?.volume?.toString() || '1',
+         musicSongName: activeMusic?.songName || '',
+         musicArtist: activeMusic?.artist || '',
+         musicArtwork: activeMusic?.artworkUrl100 || ''
+       };
+       
+       
        router.push({
          pathname: '/post-editor',
-         params: { 
-           mediaUri: finalUri,
-           mediaType: 'video',
-           // We pass these for metadata/fallback, but finalUri is already rendered
-           trimStart: Math.floor(clips[0].trimStart).toString(),
-           trimEnd: Math.floor(clips[0].trimEnd).toString(),
-           isMuted: isMuted ? 'true' : 'false',
-           musicUrl: activeMusic?.url || '',
-           musicTrimStart: activeMusic?.trimStart?.toString() || '0',
-           musicVolume: activeMusic?.volume?.toString() || '1'
-         }
+         params
        } as any);
      } catch (e) {
-       console.error("[Editor] Export error:", e);
        Alert.alert("Error", "Failed to export video.");
      } finally {
        setIsExporting(false);
@@ -401,7 +412,7 @@ const TikTokEditorScreen = () => {
                   {musicList.map((song: any) => (
                     <TouchableOpacity 
                       key={song.trackId || song.previewUrl} 
-                      onPress={() => onAddMusic(song.previewUrl)} 
+                      onPress={() => onAddMusic(song)} 
                       style={styles.musicRow}
                       activeOpacity={0.7}
                     >

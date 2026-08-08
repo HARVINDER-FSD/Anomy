@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import { apiClient } from '../src/api/client';
 import { resolveAvatarUrl, resolveMediaUrl } from '../src/utils/imageUtils';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
+import { socketService } from '../src/lib/socket';
+import { useAuthStore } from '../src/store/authStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -38,22 +40,25 @@ interface ShareModalProps {
   mediaUrl?: string;
   mediaType?: 'image' | 'video';
   isShot?: boolean;
+  authorUsername?: string;
+  authorAvatar?: string;
 }
 
-export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, postId, postContent, mediaUrl, mediaType, isShot }) => {
+export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, postId, postContent, mediaUrl, mediaType, isShot, authorUsername, authorAvatar }) => {
   const router = useRouter();
+  const { user: currentUser } = useAuthStore();
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
-  const [sendingTo, setSendingTo] = useState<string | null>(null);
-  const [sentUsers, setSentUsers] = useState<Set<string>>(new Set());
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
 
   useEffect(() => {
     if (isVisible) {
       fetchMutualFollowers();
     } else {
       setSearch('');
-      setSentUsers(new Set());
+      setSelectedUserIds(new Set());
     }
   }, [isVisible]);
 
@@ -65,36 +70,84 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
         setUsers(response.data.data.users);
       }
     } catch (error) {
-      console.error('[ShareModal] Error fetching users:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSend = async (recipientId: string) => {
-    setSendingTo(recipientId);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const toggleSelectUser = (userId: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const handleBulkSend = async () => {
+    if (selectedUserIds.size === 0) return;
+    setIsSendingBulk(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     try {
-      // 1. Get or create conversation
-      const convRes = await apiClient.post('/chat/conversations', { userId: recipientId });
-      const conversationId = convRes.data.id || convRes.data._id;
+      const currentUser = useAuthStore.getState().user;
+      const sendPromises = Array.from(selectedUserIds).map(async (recipientId) => {
+        try {
+          const convRes = await apiClient.post('/users/conversations', { 
+            recipientId: recipientId,
+            isAnonymous: currentUser?.isAnonymousMode === true
+          });
+          const convData = convRes.data?.data || convRes.data;
+          const conversationId = convData?.conversation?.id || 
+                                 convData?.conversation?._id || 
+                                 convData?.id || 
+                                 convData?._id;
 
-      // 2. Send post as a message
-      // We can use a special message_type 'post_share' if backend supports it, 
-      // otherwise send as text with post link
-      await apiClient.post(`/chat/conversations/${conversationId}/messages`, {
-        content: `Check out this post: https://anufy.app/post/${postId}\n\n${postContent || ''}`,
-        type: 'text', // Or 'post_share' if implemented
+          if (!conversationId) return;
+
+          let finalType = isShot ? 'shot_share' : 'post_share';
+          if (!isShot && mediaType === 'video') {
+            finalType = 'shot_share';
+          }
+
+          const content = finalType === 'shot_share' ? `https://anufy.app/reels/${postId}` : `https://anufy.app/post/${postId}`;
+          const resolvedMediaUrl = resolveMediaUrl(mediaUrl);
+          const resolvedAvatar = resolveAvatarUrl(authorAvatar);
+
+          if (socketService.socket?.connected) {
+            socketService.sendMessage({
+              chatId: conversationId,
+              recipientId,
+              content,
+              type: finalType,
+              mediaUrl: resolvedMediaUrl,
+              authorUsername,
+              authorAvatar: resolvedAvatar,
+              tempMessageId: `share_${Date.now()}_${recipientId}`
+            });
+          } else {
+            await apiClient.post(`/chat/conversations/${conversationId}/messages`, {
+              content,
+              type: finalType,
+              media_url: resolvedMediaUrl,
+              author_username: authorUsername,
+              author_avatar: resolvedAvatar,
+            });
+          }
+        } catch (err) {
+        }
       });
 
-      setSentUsers(prev => new Set(prev).add(recipientId));
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await Promise.all(sendPromises);
+      setSelectedUserIds(new Set());
+      onClose();
     } catch (error) {
-      console.error('[ShareModal] Error sending post:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
-      setSendingTo(null);
+      setIsSendingBulk(false);
     }
   };
 
@@ -128,8 +181,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
   );
 
   const renderUser = ({ item }: { item: User }) => {
-    const isSent = sentUsers.has(item.id);
-    const isSending = sendingTo === item.id;
+    const isSelected = selectedUserIds.has(item.id);
 
     return (
       <View style={styles.userItem}>
@@ -148,20 +200,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
         </View>
         
         <TouchableOpacity 
-          style={[
-            styles.sendBtn, 
-            isSent && styles.sentBtn,
-            isSending && { opacity: 0.7 }
-          ]} 
-          onPress={() => !isSent && handleSend(item.id)}
-          disabled={isSent || isSending}
+          style={styles.selectBtn} 
+          onPress={() => toggleSelectUser(item.id)}
         >
-          {isSending ? (
-            <ActivityIndicator size="small" color={COLORS.white} />
+          {isSelected ? (
+            <Ionicons name="checkmark-circle" size={26} color={COLORS.primary} />
           ) : (
-            <Text style={[styles.sendBtnText, isSent && styles.sentBtnText]}>
-              {isSent ? 'Sent' : 'Send'}
-            </Text>
+            <Ionicons name="ellipse-outline" size={26} color={COLORS.border} />
           )}
         </TouchableOpacity>
       </View>
@@ -186,14 +231,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.addToStoryBtn} onPress={handleAddToStory}>
-            <View style={styles.storyIconBox}>
-              <Ionicons name="aperture" size={24} color={COLORS.white} />
-            </View>
-            <Text style={styles.addToStoryText}>Add to Story</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.subtitle} />
-          </TouchableOpacity>
-
           <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color={COLORS.subtitle} style={styles.searchIcon} />
             <TextInput
@@ -204,6 +241,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
               onChangeText={setSearch}
             />
           </View>
+
+          <TouchableOpacity style={styles.addToStoryBtn} onPress={handleAddToStory}>
+            <Image 
+              source={{ uri: resolveAvatarUrl(currentUser?.avatar_url || currentUser?.avatar, currentUser?.username) }} 
+              style={styles.storyAvatar} 
+            />
+            <Text style={styles.addToStoryText}>Add to Story</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.subtitle} />
+          </TouchableOpacity>
 
           {loading && users.length === 0 ? (
             <View style={styles.centerNode}>
@@ -224,6 +270,23 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
                 </View>
               }
             />
+          )}
+
+          {selectedUserIds.size > 0 && (
+            <TouchableOpacity 
+              style={styles.bottomSendBtn} 
+              onPress={handleBulkSend}
+              disabled={isSendingBulk}
+              activeOpacity={0.8}
+            >
+              {isSendingBulk ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <Text style={styles.bottomSendBtnText}>
+                  Send to {selectedUserIds.size} Friend{selectedUserIds.size > 1 ? 's' : ''}
+                </Text>
+              )}
+            </TouchableOpacity>
           )}
         </Pressable>
       </Pressable>
@@ -270,22 +333,16 @@ const styles = StyleSheet.create({
   addToStoryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
     marginHorizontal: scale(20),
-    padding: moderateScale(12),
-    borderRadius: moderateScale(15),
+    paddingVertical: verticalScale(8),
     marginBottom: verticalScale(15),
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
-  storyIconBox: {
+  storyAvatar: {
     width: moderateScale(40),
     height: moderateScale(40),
     borderRadius: moderateScale(20),
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: scale(12),
+    backgroundColor: COLORS.surface,
   },
   addToStoryText: {
     flex: 1,
@@ -298,9 +355,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     marginHorizontal: scale(20),
-    borderRadius: moderateScale(12),
+    borderRadius: moderateScale(25),
     paddingHorizontal: scale(12),
     marginBottom: verticalScale(15),
+    borderWidth: 1,
+    borderColor: '#000000',
   },
   searchIcon: {
     marginRight: scale(8),
@@ -350,27 +409,29 @@ const styles = StyleSheet.create({
     color: COLORS.subtitle,
     marginTop: 2,
   },
-  sendBtn: {
+  selectBtn: {
+    padding: moderateScale(4),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomSendBtn: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: scale(16),
-    paddingVertical: verticalScale(8),
-    borderRadius: moderateScale(20),
-    minWidth: scale(70),
+    marginHorizontal: scale(20),
+    marginBottom: verticalScale(20),
+    paddingVertical: verticalScale(12),
+    borderRadius: moderateScale(15),
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  sentBtn: {
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  sendBtnText: {
-    color: COLORS.black,
-    fontSize: moderateFont(14),
+  bottomSendBtnText: {
+    color: COLORS.white,
+    fontSize: moderateFont(16),
     fontWeight: 'bold',
-  },
-  sentBtnText: {
-    color: COLORS.subtitle,
   },
   centerNode: {
     flex: 1,

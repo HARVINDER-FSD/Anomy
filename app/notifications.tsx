@@ -2,20 +2,56 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, RefreshControl, Platform, Alert, Animated, PanResponder, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/store/authStore';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MessageCircleDashed } from 'lucide-react-native';
 import { COLORS } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { socketService } from '@/src/lib/socket';
 import { verticalScale, moderateScale, scale } from '@/src/utils/responsive';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
+import { VerifiedTick } from '@/src/components/common/VerifiedTick';
+import { ListSkeleton } from '@/src/components/common/Skeleton';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { useNotificationStore } from '@/src/store/notificationStore';
+import { FlashList } from '@shopify/flash-list';
+const FastFlashList = FlashList as React.ComponentType<any>;
+import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
+import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
+import { useFollowStatus } from '@/src/hooks/useFollowStatus';
+import { FollowButton } from '@/src/components/common/FollowButton';
+import { FollowRequestActions } from '@/src/components/common/FollowRequestActions';
+
+// Wrapper so each notification row can own its own hook instance without hooks-in-renderItem violation
+function NotificationFollowButton({ targetUserId, initialState }: { targetUserId: string; initialState?: any }) {
+  const { toggleFollow, isLoading } = useFollowStatus(targetUserId, initialState);
+  return (
+    <FollowButton
+      targetUserId={targetUserId}
+      onToggle={toggleFollow}
+      isLoading={isLoading}
+      variant="primary"
+      size="sm"
+      followsBackLabel={!!initialState?.isFollower}
+    />
+  );
+}
+
 
 export default function NotificationsScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { user: currentUser } = useAuthStore();
-  const [notifications, setNotifications] = useState<any[]>([]);
+  // Use global Zustand store states and actions
+  const { 
+    notifications, 
+    setNotifications, 
+    fetchNotifications 
+  } = useNotificationStore();
+
   const [favoriteNotifications, setFavoriteNotifications] = useState<Set<string>>(new Set());
   const [resharedIds, setResharedIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  
+  // Initialize loading based on whether we already have cached notifications
+  const [loading, setLoading] = useState(notifications.length === 0);
   const [refreshing, setRefreshing] = useState(false);
 
   const handleFavoriteNotification = async (notificationId: string, index: number) => {
@@ -39,7 +75,6 @@ export default function NotificationsScreen() {
       await apiClient.put(`/notifications/${notificationId}/favorite`, { 
         isFavorite: !isFavorite 
       }).catch(err => {
-        console.error("Error updating favorite:", err);
         // Revert on error
         if (isFavorite) {
           setFavoriteNotifications(prev => new Set([...prev, notificationId]));
@@ -52,7 +87,6 @@ export default function NotificationsScreen() {
         }
       });
     } catch (error) {
-      console.error("Error favoriting notification:", error);
     }
   };
 
@@ -74,213 +108,202 @@ export default function NotificationsScreen() {
   const markAllRead = async () => {
     try {
       await apiClient.put('/notifications/read-all');
-      fetchNotifications();
+      useNotificationStore.getState().setUnreadNotificationsCount(0);
+      fetchNotifications(true);
     } catch (error) {
-       console.error("Error marking read:", error);
        Alert.alert("Error", "Could not mark notifications as read.");
-    }
-  };
-
-  const fetchNotifications = async (isRefreshing = false) => {
-    try {
-      if (!isRefreshing) setLoading(true);
-      
-      const [notifsRes, requestsRes] = await Promise.all([
-        apiClient.get('/notifications').catch(err => {
-          console.error('[Notifications] API Error:', err?.response?.data || err.message);
-          return { data: { success: true, data: [] } };
-        }),
-        // Only fetch follow requests if current user is private OR we want to show pending ones
-        currentUser?.is_private ? 
-          apiClient.get('/users/follow-requests').catch(err => {
-            console.error('[FollowRequests] API Error:', err?.response?.data || err.message);
-            return { data: { success: true, data: [] } };
-          }) : 
-          Promise.resolve({ data: { success: true, data: [] } })
-      ]);
-
-      const formattedNotifs = notifsRes.data?.data || [];
-      
-      // Follow requests already come with user data at root from UserService.getPendingFollowRequests
-      const rawRequests = requestsRes.data?.data || [];
-      const formattedRequests = Array.isArray(rawRequests) ? rawRequests.map((req: any) => {
-        const userId = req._id || req.id;
-        const userIdStr = userId?.toString() || '';
-        
-        return {
-          ...req,
-          id: userIdStr, // Ensure stable string ID
-          _id: userIdStr,
-          // Ensure actor structure matches what renderNotification expects
-          actor: {
-            id: userIdStr,
-            _id: userIdStr,
-            username: req.username || 'Someone',
-            avatar_url: req.avatar_url,
-            full_name: req.full_name,
-            is_verified: req.is_verified
-          },
-          type: 'follow_request',
-          is_request: true,
-          created_at: req.requested_at || new Date()
-        };
-      }) : [];
-
-      // Combine and sort by date
-      const allNotifications = [...formattedRequests, ...formattedNotifs];
-      
-      // De-duplicate: 
-      // 1. By unique ID (if available)
-      // 2. For follow requests, ensure only one request per actor is shown
-      const seenIds = new Set();
-      const seenFollowRequests = new Set();
-      
-      const deduplicated = allNotifications.filter(item => {
-        const itemId = item.id || item._id;
-        
-        // If it's a follow request, de-duplicate by actor ID
-        if (item.type === 'follow_request' || item.is_request) {
-          const actorId = item.actor?.id || item.actor?._id;
-          if (actorId) {
-            if (seenFollowRequests.has(actorId.toString())) return false;
-            seenFollowRequests.add(actorId.toString());
-          }
-        }
-        
-        // General de-duplication by ID
-        if (itemId) {
-          if (seenIds.has(itemId.toString())) return false;
-          seenIds.add(itemId.toString());
-        }
-        
-        return true;
-      });
-
-      // Grouping mentions and other repetitive notifications
-      const grouped: any[] = [];
-      const mentionGroups: Record<string, any> = {};
-
-      deduplicated.forEach(notif => {
-        const actorId = (notif.actor?.id || notif.actor?._id || '').toString();
-        
-        if (notif.type === 'mention' && actorId) {
-          if (!mentionGroups[actorId]) {
-            mentionGroups[actorId] = { ...notif, count: 1, targetIds: [notif.data?.targetId].filter(Boolean) };
-            grouped.push(mentionGroups[actorId]);
-          } else {
-            mentionGroups[actorId].count += 1;
-            if (notif.data?.targetId && !mentionGroups[actorId].targetIds.includes(notif.data.targetId)) {
-              mentionGroups[actorId].targetIds.push(notif.data.targetId);
-            }
-            // Keep the most recent timestamp
-            if (new Date(notif.created_at) > new Date(mentionGroups[actorId].created_at)) {
-              mentionGroups[actorId].created_at = notif.created_at;
-            }
-          }
-        } else {
-          grouped.push(notif);
-        }
-      });
-
-      const sorted = grouped.sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-
-      setNotifications(sorted);
-      
-      // Update unread count if returned
-      if (notifsRes.data.unreadCount !== undefined) {
-        // You could update a global store here if needed
-      }
-    } catch (error) {
-      console.error('Error fetching activity:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
   };
 
   const handleAcceptRequest = async (followerId: string, index: number) => {
     if (!followerId) {
-      console.error("[Notifications] Cannot accept: No followerId provided");
       return;
     }
-    try {
-      console.log(`[Notifications] Accepting request from ${followerId}`);
-      const res = await apiClient.post(`/users/follow-requests/${followerId}/accept`);
-      console.log(`[Notifications] Accept successful:`, res.data);
-      
-      const updated = [...notifications];
-      // Convert request to a regular follow notification
-      if (updated[index]) {
-        updated[index].is_request = false;
-        updated[index].type = 'follow_accept';
-        updated[index].content = 'is now following you';
-        // Note: isFollowing should stay whatever it was (false if not following back)
-        // so that the "Follow back" button appears.
-        setNotifications(updated);
+    
+    const originalNotifs = [...notifications];
+    const targetNotif = originalNotifs[index];
+    if (!targetNotif) return;
+
+    // Optimistic Update
+    setNotifications(prev => prev.map((item) => {
+      const itemId = item.id || item._id;
+      const targetId = targetNotif.id || targetNotif._id;
+      if (itemId === targetId) {
+        return {
+          ...item,
+          is_request: false,
+          type: 'follow_accept',
+          content: 'is now following you',
+        };
       }
+      return item;
+    }));
+
+    try {
+      // Actual API call is handled by the hook inside the item component
     } catch (error) {
-      console.error("[Notifications] Error accepting request:", error);
+      // Revert on error
+      setNotifications(originalNotifs);
       Alert.alert("Action Failed", "Could not accept follow request. Please try again.");
     }
   };
 
   const handleRejectRequest = async (followerId: string, index: number) => {
     if (!followerId) return;
+
+    const originalNotifs = [...notifications];
+    const targetNotif = originalNotifs[index];
+    if (!targetNotif) return;
+
+    // Optimistic Update: immediately remove from UI list
+    setNotifications(prev => prev.filter((item) => (item.id || item._id) !== (targetNotif.id || targetNotif._id)));
+
     try {
-      console.log(`[Notifications] Rejecting request from ${followerId}`);
-      await apiClient.post(`/users/follow-requests/${followerId}/reject`);
-      setNotifications(prev => prev.filter((_, i) => i !== index));
+      // Actual API call is handled by the hook inside the item component
     } catch (error) {
-      console.error("[Notifications] Error rejecting request:", error);
+      // Revert on error
+      setNotifications(originalNotifs);
       Alert.alert("Action Failed", "Could not reject follow request.");
     }
   };
 
   useEffect(() => {
-    fetchNotifications();
+    // Fresh background fetch
+    const refreshData = async () => {
+      try {
+        await fetchNotifications(false);
+      } catch (err) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    refreshData();
 
-    socketService.socket?.on('notification:new', (notification: any) => {
-      console.log('[Notifications] Real-time notification received:', notification);
-      
-      // 🚀 SKIP messages in the notification list (they should only show as banners)
-      if (notification.type === 'message') return;
+    apiClient.put('/notifications/read-all')
+      .then(() => useNotificationStore.getState().setUnreadNotificationsCount(0))
+      .catch(() => {});
+  }, []);
 
-      setNotifications(prev => {
-        const notificationId = notification.id || notification._id;
-        
-        // Check if we already have this notification by ID
-        if (notificationId && prev.some(item => (item.id || item._id) === notificationId)) {
-          return prev;
-        }
-        
-        // If it's a follow request, check if we already have a request from this actor
-        if (notification.type === 'follow_request' || notification.is_request) {
-          const actorId = notification.actor?.id || notification.actor?._id;
-          if (actorId && prev.some(item => 
-            (item.type === 'follow_request' || item.is_request) && 
-            (item.actor?.id || item.actor?._id) === actorId
-          )) {
-            return prev;
+  // Handle Real-time Account Deletions for Notifications
+  useEffect(() => {
+    const cachedNotifs = useNotificationStore.getState().notifications;
+    const hasCache = cachedNotifs.length > 0 || notifications.length > 0;
+    performanceEngine.startScreenTrace('NotificationsScreen');
+    performanceEngine.trackCacheAccess('Profile', hasCache);
+    performanceEngine.endScreenTrace('NotificationsScreen', hasCache);
+    const socket = socketService.socket;
+    if (!socket) return;
+    
+    const handleUserDeleted = ({ userId }: { userId: string }) => {
+      // Optimistically remove notifications related to the deleted user
+      setNotifications(prev => prev.filter(item => {
+        const actorId = item.actor_id || item.actorId || item.actor?.id || item.actor?._id;
+        return String(actorId) !== String(userId);
+      }));
+    };
+
+    const handleFollowStatusChanged = ({ followerId, followingId, isFollowing, isPending }: any) => {
+      // If the current user followed or unfollowed someone, update the button state
+      if (String(followerId) === String(currentUser?.id || currentUser?._id)) {
+        setNotifications(prev => prev.map(item => {
+          const actorId = item.actor_id || item.actorId || item.actor?.id || item.actor?._id;
+          if (String(actorId) === String(followingId)) {
+            return { 
+              ...item, 
+              isFollowing: isFollowing, 
+              is_following: isFollowing, 
+              isPending: isPending || false, 
+              is_pending: isPending || false 
+            };
           }
-        }
-        
+          return item;
+        }));
+      }
+    };
+
+    const handleFollowRemoved = ({ followerId, followingId }: any) => {
+      // If someone unfollows the current user, remove the follow notification
+      if (String(followingId) === String(currentUser?.id || currentUser?._id)) {
+        setNotifications(prev => prev.filter(item => {
+          if (item.type === 'follow' || item.type === 'follow_request') {
+            const actorId = item.actor_id || item.actorId || item.actor?.id || item.actor?._id;
+            return String(actorId) !== String(followerId);
+          }
+          return true;
+        }));
+      }
+    };
+
+    const handleFollowRequestCancelled = ({ followerId, followingId }: any) => {
+      if (String(followingId) === String(currentUser?.id || currentUser?._id)) {
+        setNotifications(prev => prev.filter(item => {
+          if (item.type === 'follow_request') {
+            const actorId = item.actor_id || item.actorId || item.actor?.id || item.actor?._id;
+            return String(actorId) !== String(followerId);
+          }
+          return true;
+        }));
+      }
+    };
+
+    const handleRelationshipUpdated = (payload: any) => {
+      // payload: { currentUserId, targetUserId, state }
+      // state: { isFollowing, isPending, isMutualFollow, followsBack }
+      if (String(payload.targetUserId) === String(currentUser?.id || currentUser?._id)) {
+        setNotifications(prev => prev.map(item => {
+          const actorId = item.actor_id || item.actorId || item.actor?.id || item.actor?._id;
+          if (String(actorId) === String(payload.currentUserId)) {
+            return {
+              ...item,
+              isFollowing: payload.state.isFollowing,
+              is_following: payload.state.isFollowing,
+              isPending: payload.state.isPending,
+              is_pending: payload.state.isPending,
+            };
+          }
+          return item;
+        }));
+      }
+    };
+
+    const handleNotificationNew = (notification: any) => {
+      setNotifications(prev => {
+        // Prevent duplicates
+        if (prev.find(n => (n._id || n.id) === (notification._id || notification.id))) return prev;
         return [notification, ...prev];
       });
-    });
+    };
+
+    const handleNotificationDeleted = (payload: { notificationId: string }) => {
+      setNotifications(prev => prev.filter(n => (n._id || n.id) !== payload.notificationId));
+    };
+
+    socket.on('user:deleted', handleUserDeleted);
+    socket.on('follow_status_changed', handleFollowStatusChanged);
+    socket.on('follow:removed', handleFollowRemoved);
+    socket.on('follow_request:cancelled', handleFollowRequestCancelled);
+    socket.on('relationship:updated', handleRelationshipUpdated);
+    socket.on('notification:new', handleNotificationNew);
+    socket.on('notification:deleted', handleNotificationDeleted);
 
     return () => {
-      socketService.socket?.off('notification:new');
+      socket.off('user:deleted', handleUserDeleted);
+      socket.off('follow_status_changed', handleFollowStatusChanged);
+      socket.off('follow:removed', handleFollowRemoved);
+      socket.off('follow_request:cancelled', handleFollowRequestCancelled);
+      socket.off('relationship:updated', handleRelationshipUpdated);
+      socket.off('notification:new', handleNotificationNew);
+      socket.off('notification:deleted', handleNotificationDeleted);
     };
-  }, []);
+  }, [setNotifications, currentUser]);
 
   const getIcon = (type: string) => {
     switch (type) {
       case 'like': 
       case 'reel_like':
       case 'story_like':
-      case 'comment_like': // 🚀 Handle new comment like type
+      case 'comment_like': // ?? Handle new comment like type
         return { name: 'heart', color: COLORS.error };
       case 'comment': 
       case 'reel_comment':
@@ -292,35 +315,8 @@ export default function NotificationsScreen() {
       case 'follow_accept': 
         return { name: 'person-add', color: '#3182CE' };
       case 'mention': return { name: 'at', color: COLORS.primary };
-      case 'secret_crush_match': return { name: 'heart-half', color: '#E53E3E' };
-      default: return { name: 'notifications', color: COLORS.subtitle };
-    }
-  };
 
-  const handleFollow = async (actorId: string, index: number) => {
-    if (!actorId || !actorId.match(/^[0-9a-fA-F]{24}$/)) {
-      console.error("[handleFollow] Invalid actorId:", actorId);
-      return;
-    }
-    
-    try {
-      const res = await apiClient.post(`/users/${actorId}/follow`);
-      const updatedNotifs = [...notifications];
-      
-      if (updatedNotifs[index]) {
-        const isFollowing = res.data.isFollowing ?? res.data.is_following;
-        const isPending = res.data.isPending ?? res.data.is_pending;
-        
-        updatedNotifs[index].isFollowing = isFollowing;
-        updatedNotifs[index].is_following = isFollowing;
-        updatedNotifs[index].isPending = isPending;
-        updatedNotifs[index].is_pending = isPending;
-        
-        setNotifications(updatedNotifs);
-      }
-    } catch (error: any) {
-      console.error("Error following from notification:", error?.response?.data || error.message);
-      Alert.alert("Error", error?.response?.data?.message || "Failed to follow user");
+      default: return { name: 'notifications', color: COLORS.subtitle };
     }
   };
 
@@ -333,7 +329,6 @@ export default function NotificationsScreen() {
         (n.id || n._id) === notificationId ? { ...n, is_read: true } : n
       ));
     } catch (error) {
-      console.error("Error marking read:", error);
     }
   };
 
@@ -346,12 +341,10 @@ export default function NotificationsScreen() {
       
       // Delete from backend
       await apiClient.delete(`/notifications/${notificationId}`).catch(err => {
-        console.error("Error deleting notification:", err);
         // Revert on error
         fetchNotifications();
       });
     } catch (error) {
-      console.error("Error deleting notification:", error);
       fetchNotifications();
     }
   };
@@ -392,9 +385,31 @@ export default function NotificationsScreen() {
     const actorUsername = actor?.username || 'Someone';
     const canFollowBack = isFollowType && !isFollowRequest && actor && actorIdStr && actorIdStr !== currentUser?.id?.toString();
     const actorAvatar = resolveAvatarUrl(actor?.avatar_url || actor?.avatar, actorUsername);
-    const postThumbnail = item.post?.image || item.data?.postImage;
-    const postId = item.post?.id || item.post?._id || item.data?.postId;
+    const rawPostThumb = item.post?.image || item.post?.image_url || item.post?.thumbnail_url || item.post?.media_urls?.[0] || item.post?.media?.[0]?.url || item.data?.postImage || item.data?.thumbnailUrl || item.data?.mediaUrl || item.data?.image_url;
+    
+    const resolvePostThumbnail = (url: string | undefined | null) => {
+      if (!url) return '';
+      let resolved = resolveMediaUrl(url);
+      if (!resolved) return '';
+      if (resolved.match(/\.(mp4|mov|mkv|webm|avi)(\?.*)?$/i) || resolved.includes('/video/upload/')) {
+        if (resolved.includes('cloudinary.com')) {
+          return resolved.replace('/video/upload/', '/video/upload/f_jpg,so_0,q_auto,w_300/').replace(/\.(mp4|mov|mkv|webm|avi)(\?.*)?$/i, '.jpg');
+        } else {
+          return resolved.replace(/\.(mp4|mov|mkv|webm|avi)(\?.*)?$/i, '.jpg');
+        }
+      }
+      return resolved;
+    };
+    
+    const postThumbnail = resolvePostThumbnail(rawPostThumb);
+    const postId = item.post?.id || item.post?._id || item.data?.postId || item.data?.reelId;
     const notifId = item.id || item._id;
+
+    const { isFollowing, isPending, isLoading, toggleFollow, acceptFollowRequest, rejectFollowRequest } = useFollowStatus(actorIdStr, {
+      isFollowing: !!(item.isFollowing || item.is_following),
+      isPending: !!(item.isPending || item.is_pending),
+    });
+    const isFollowed = isFollowing || isPending;
 
     return (
       <View style={styles.swipeContainer}>
@@ -443,14 +458,40 @@ export default function NotificationsScreen() {
           >
             <Image source={{ uri: actorAvatar }} style={styles.avatar} />
             <View style={styles.content}>
-              <Text style={styles.message}>
-                <Text style={styles.bold}>{actorUsername.replace(/^@/, '')} </Text>
-                {isFollowRequest ? 'requested to follow you' : (
-                  item.type === 'mention' && item.count > 1 
-                    ? `mentioned you in ${item.count} stories` 
-                    : (item.content || item.message || 'interacted with you')
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.message}>
+                  <Text style={styles.bold}>{actorUsername.replace(/^@/, '')} </Text>
+                  {isFollowRequest ? 'requested to follow you' : (
+                    item.type === 'follow_accept'
+                      ? 'accepted your follow request and started following you'
+                      : (item.type === 'mention' && item.count > 1 
+                          ? `mentioned you in ${item.count} stories` 
+                          : (() => {
+                              const raw = item.content || item.message || 'interacted with you';
+                              const fullName = actor?.full_name || (item.actor as any)?.full_name || '';
+                              const cleanUser = actorUsername.replace(/^@/, '').trim();
+                              let clean = raw.trim();
+
+                              if (clean.startsWith('@')) {
+                                clean = clean.substring(1).trim();
+                              }
+                              if (fullName && clean.toLowerCase().startsWith(fullName.toLowerCase())) {
+                                clean = clean.substring(fullName.length).trim();
+                              }
+                              if (cleanUser && clean.toLowerCase().startsWith(cleanUser.toLowerCase())) {
+                                clean = clean.substring(cleanUser.length).trim();
+                              }
+                              if (clean.startsWith('@')) {
+                                clean = clean.substring(1).trim();
+                              }
+                              return clean || raw;
+                            })())
+                  )}
+                </Text>
+                {actor?.is_verified && (
+                   <VerifiedTick badgeType={actor?.badge_type} size={13} />
                 )}
-              </Text>
+              </View>
               <Text style={styles.time}>{item.timestamp || formatTime(item.created_at)}</Text>
             </View>
             
@@ -470,43 +511,59 @@ export default function NotificationsScreen() {
               </TouchableOpacity>
             )}
             {isFollowRequest ? (
-              <View style={styles.requestBtns}>
-                <TouchableOpacity 
-                  style={styles.acceptBtn} 
-                  onPress={() => actorIdStr && handleAcceptRequest(actorIdStr, index)}
-                >
-                  <Text style={styles.acceptBtnText}>Accept</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.rejectBtn} 
-                  onPress={() => actorIdStr && handleRejectRequest(actorIdStr, index)}
-                >
-                  <Ionicons name="close" size={20} color={COLORS.subtitle} />
-                </TouchableOpacity>
-              </View>
+              <FollowRequestActions
+                targetUserId={actorIdStr || ''}
+                variant="icon"
+                onAcceptSuccess={() => {
+                  if (actorIdStr) handleAcceptRequest(actorIdStr, index);
+                }}
+                onRejectSuccess={() => {
+                  if (actorIdStr) handleRejectRequest(actorIdStr, index);
+                }}
+              />
             ) : canFollowBack && (
-              <TouchableOpacity 
-                style={[styles.followBtn, (item.isFollowing || item.is_following) && styles.followingBtn, (item.isPending || item.is_pending) && styles.requestedBtn]} 
-                onPress={() => handleFollow(actorIdStr, index)}
-                disabled={item.isPending || item.is_pending}
-              >
-                <Text style={[styles.followBtnText, (item.isFollowing || item.is_following) && styles.followingBtnText, (item.isPending || item.is_pending) && styles.requestedBtnText]}>
-                  {item.isPending || item.is_pending ? 'Requested' : (item.isFollowing || item.is_following ? 'Following' : 'Follow back')}
-                </Text>
-              </TouchableOpacity>
+              <NotificationFollowButton
+                targetUserId={actorIdStr || ''}
+                initialState={{ isFollowing: !!(item.isFollowing || item.is_following), isPending: !!(item.isPending || item.is_pending), isFollower: true }}
+              />
             )}
 
             {(!isFollowType && !isFollowRequest && item.type !== 'mention') && (
               postThumbnail ? (
                 <TouchableOpacity 
                   style={styles.thumbnailContainer}
-                  onPress={() => { if (postId) router.push(`/post/${postId}`); }}
+                  onPress={() => { 
+                    if (item.type?.includes('story') || item.data?.storyId) {
+                      const storyUserId = actorIdStr || item.actor_id || item.user_id || currentUser?.id;
+                      router.push(`/stories/${storyUserId}`);
+                    } else if (item.type?.includes('reel') || item.data?.reelId) {
+                      if (postId) router.push(`/reels/${postId}`);
+                    } else if (postId) {
+                      router.push(`/post/${postId}`);
+                    }
+                  }}
+                  activeOpacity={0.8}
                 >
                   <Image source={{ uri: resolveMediaUrl(postThumbnail) }} style={styles.postThumbnail} resizeMode="cover" />
+                  <View style={[styles.typeBadge, { backgroundColor: icon.color || COLORS.error }]}>
+                    {item.type?.includes('comment') || item.type === 'reply' ? (
+                      <MessageCircleDashed size={10} color="#FFF" />
+                    ) : item.type?.includes('like') ? (
+                      <MaterialCommunityIcons name="thumb-up" size={9} color="#FFF" />
+                    ) : (
+                      <Ionicons name={icon.name as any} size={10} color="#FFF" />
+                    )}
+                  </View>
                 </TouchableOpacity>
               ) : (
                 <View style={styles.iconContainer}>
-                  <Ionicons name={icon.name as any} size={20} color={icon.color} />
+                  {item.type?.includes('comment') || item.type === 'reply' ? (
+                    <MessageCircleDashed size={18} color={icon.color} />
+                  ) : item.type?.includes('like') ? (
+                    <MaterialCommunityIcons name="thumb-up" size={18} color="#FF3040" />
+                  ) : (
+                    <Ionicons name={icon.name as any} size={20} color={icon.color} />
+                  )}
                 </View>
               )
             )}
@@ -539,13 +596,26 @@ export default function NotificationsScreen() {
           <ActivityIndicator size="large" color={COLORS.secondary} />
         </View>
       ) : (
-        <FlatList
+        <FastFlashList
           data={notifications}
-          keyExtractor={(item) => item._id || item.id}
+          keyExtractor={(item: any) => item._id || item.id}
           renderItem={renderNotification}
+          estimatedItemSize={70}
+          drawDistance={300}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchNotifications(true); }} />
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={async () => {
+                setRefreshing(true);
+                try {
+                  await fetchNotifications(true);
+                } catch (err) {
+                } finally {
+                  setRefreshing(false);
+                }
+              }} 
+            />
           }
           ListEmptyComponent={
             <View style={styles.centered}>
@@ -555,6 +625,7 @@ export default function NotificationsScreen() {
           }
         />
       )}
+      <PerformanceOverlay />
     </SafeAreaView>
   );
 }
@@ -626,7 +697,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   followBtnText: {
-    color: COLORS.text,
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
   },

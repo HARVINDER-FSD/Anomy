@@ -10,12 +10,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
-import { moderateFont } from '@/src/utils/responsive';
-import { Audio, Video, ResizeMode } from 'expo-av';
+import { moderateFont, scale, verticalScale } from '@/src/utils/responsive';
+import { Audio } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEvent } from 'expo';
 import Svg, { Path, G as SvgGroup } from 'react-native-svg';
 import { useAuthStore } from '@/src/store/authStore';
 import { BlurView } from 'expo-blur';
 import { ProfileAvatar } from '@/components/ProfileAvatar';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
+import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
+
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -203,11 +209,14 @@ const StoryElement = React.memo(({ el, scaleX, scaleY, displayW, displayH, onEle
 
 export default function StoryViewerScreen() {
   const { userId } = useLocalSearchParams();
-  const router = useRouter();
+  const router = useSafeRouter();
 
   const { user: currentUser } = useAuthStore();
   const [stories, setStories] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const currentStory = (stories && stories[currentIndex]) || null;
+  const storyOwnerId = (currentStory?.user_id as any)?._id?.toString() || currentStory?.user_id?.toString() || '';
+  const isOwner = (currentUser as any)?.id === storyOwnerId || (currentUser as any)?._id === storyOwnerId;
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState('');
   const [isPaused, setIsPaused] = useState(false);
@@ -232,10 +241,37 @@ export default function StoryViewerScreen() {
   const progress = useRef(new Animated.Value(0)).current;
   const soundRef = useRef<Audio.Sound | null>(null);
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
-  const videoRef = useRef<Video | null>(null);
   const [storyDuration, setStoryDuration] = useState(DEFAULT_IMAGE_DURATION);
   const isFocused = useIsFocused();
   const viewerMusicReqId = useRef(0); // 🚀 Track audio requests to prevent race conditions
+
+  const videoUrl = currentStory?.media_type === 'video' ? resolveMediaUrl(currentStory.media_url) : '';
+  const player = useVideoPlayer(videoUrl, p => {
+    p.loop = false;
+  });
+
+  // Observe player status and end events
+  useEffect(() => {
+    if (currentStory?.media_type !== 'video') return;
+
+    const statusSub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') {
+        const durMs = player.duration * 1000 || DEFAULT_IMAGE_DURATION;
+        const capped = Math.min(durMs, MAX_STORY_DURATION);
+        setStoryDuration(capped);
+        startAnimation(capped);
+      }
+    });
+
+    const endSub = player.addListener('playToEnd', () => {
+      nextStory();
+    });
+
+    return () => {
+      statusSub.remove();
+      endSub.remove();
+    };
+  }, [player, currentStory]);
 
   // 🚀 Auto-Cleanup when screen is NOT focused (prevents background ghost playback)
   useEffect(() => {
@@ -246,11 +282,10 @@ export default function StoryViewerScreen() {
         soundRef.current.unloadAsync();
         soundRef.current = null;
       }
-      if (videoRef.current) {
-        videoRef.current.pauseAsync();
-      }
+      player.pause();
     }
-  }, [isFocused]);
+  }, [isFocused, player]);
+
 
   // ── Audio Mode Setup & Fetch stories ──
   useEffect(() => {
@@ -285,6 +320,9 @@ export default function StoryViewerScreen() {
   };
 
   const fetchUserStories = async () => {
+    const hasCache = stories.length > 0;
+    performanceEngine.startScreenTrace('StoryViewerScreen');
+    performanceEngine.trackCacheAccess('Stories', hasCache);
     try {
       setLoading(true);
       const res = await apiClient.get(`/stories/user/${userId}`, { headers: { 'Cache-Control': 'no-cache' } });
@@ -300,8 +338,8 @@ export default function StoryViewerScreen() {
       } else {
         router.back();
       }
+      performanceEngine.endScreenTrace('StoryViewerScreen', hasCache);
     } catch (error) {
-      console.error('Error fetching stories:', error);
       router.back();
     } finally {
       setLoading(false);
@@ -354,16 +392,12 @@ export default function StoryViewerScreen() {
           return 0;
         }
       } catch (e) {
-        console.error('Error playing story music:', e);
       }
     }
     return 0; // no music
   };
 
   // ── Build renderable elements & owner check ──
-  const currentStory = (stories && stories[currentIndex]) || null;
-  const storyOwnerId = (currentStory?.user_id as any)?._id?.toString() || currentStory?.user_id?.toString() || '';
-  const isOwner = (currentUser as any)?.id === storyOwnerId || (currentUser as any)?._id === storyOwnerId;
 
   const currentMusic = useMemo(() => {
     if (currentStory?.music) return currentStory.music;
@@ -384,7 +418,7 @@ export default function StoryViewerScreen() {
         if (isVideo) {
           // For video: duration is driven by onPlaybackStatusUpdate/onLoad
           progress.setValue(0);
-          if (videoRef.current) videoRef.current.playAsync();
+          player.play();
         } else {
           // For image: determine duration from music or default
           const dur = musicDuration > 0 ? musicDuration : DEFAULT_IMAGE_DURATION;
@@ -396,18 +430,18 @@ export default function StoryViewerScreen() {
     } else {
       if (animRef.current) animRef.current.stop();
       if (soundRef.current) soundRef.current.pauseAsync().catch(() => { });
-      if (videoRef.current) videoRef.current.pauseAsync().catch(() => { });
+      player.pause();
     }
-  }, [currentIndex, stories, loading, isPaused, isOwner]);
+  }, [currentIndex, stories, loading, isPaused, isOwner, player]);
 
-  const markViewed = async (story: any) => {
+  async function markViewed(story: any) {
     try {
       const storyId = story._id || story.id;
       if (storyId) await apiClient.post(`/stories/${storyId}/view`);
     } catch (e) { /* silent */ }
-  };
+  }
 
-  const startAnimation = (duration: number = DEFAULT_IMAGE_DURATION) => {
+  function startAnimation(duration: number = DEFAULT_IMAGE_DURATION) {
     if (animRef.current) animRef.current.stop();
     progress.setValue(0);
     const anim = Animated.timing(progress, {
@@ -419,45 +453,31 @@ export default function StoryViewerScreen() {
     anim.start(({ finished }) => {
       if (finished) nextStory();
     });
-  };
+  }
 
-  // Called by video player when it knows its duration
-  const onVideoLoad = (status: any) => {
-    const durMs = status?.durationMillis || DEFAULT_IMAGE_DURATION;
-    const capped = Math.min(durMs, MAX_STORY_DURATION);
-    setStoryDuration(capped);
-    startAnimation(capped);
-  };
 
-  // Called when video finishes playing
-  const onVideoPlaybackUpdate = (status: any) => {
-    if (status?.didJustFinish) {
-      nextStory();
-    }
-  };
-
-  const nextStory = () => {
+  function nextStory() {
     if (currentIndex < stories.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
       router.back();
     }
-  };
+  }
 
-  const restartStory = () => {
+  function restartStory() {
     setCurrentIndex(0);
     progress.setValue(0);
     startAnimation();
-  };
+  }
 
-  const prevStory = () => {
+  function prevStory() {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
     } else {
       progress.setValue(0);
       startAnimation();
     }
-  };
+  }
 
   const handleTap = (evt: any) => {
     const x = evt.nativeEvent.locationX;
@@ -475,7 +495,6 @@ export default function StoryViewerScreen() {
       const username = currentStory.user_id?.username || currentStory.username || 'user';
       Alert.alert('Sent', 'Reply sent to ' + username);
     } catch (error) {
-      console.error('Error replying to story:', error);
     }
   };
 
@@ -498,7 +517,6 @@ export default function StoryViewerScreen() {
         setViewersList(res.data.data.viewers || []);
       }
     } catch (e) {
-      console.error('Error fetching viewers:', e);
     } finally {
       setLoadingViewers(false);
     }
@@ -668,34 +686,27 @@ export default function StoryViewerScreen() {
           {/* Layer 1: Base media — Video or Image (Skipped if nested in reshare card) */}
           {showBaseMedia && (
             currentStory.media_type === 'video' ? (
-              <Video
-                ref={videoRef}
-                source={{ uri: resolveMediaUrl(currentStory.media_url) }}
-              style={[
-                viewerStyles.baseMedia,
-                baseEl && {
-                  width: baseW,
-                  height: baseH,
-                  position: 'absolute',
-                  left: (displayW / 2) - (baseW / 2),
-                  top: (displayH / 2) - (baseH / 2),
-                  transform: [
-                    { translateX: (baseEl.x || 0) * scaleX },
-                    { translateY: (baseEl.y || 0) * scaleY },
-                    { scale: (baseEl.scale || 1) * scaleX },
-                    { rotate: `${baseEl.rotate || 0}deg` }
-                  ]
-                }
-              ]}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={!isPaused}
-              isLooping={false}
-              volume={1.0}
-              isMuted={false}
-              onLoad={onVideoLoad}
-              onError={(e) => console.error('Video Error:', e)}
-              onPlaybackStatusUpdate={onVideoPlaybackUpdate}
-            />
+              <VideoView
+                player={player}
+                style={[
+                  viewerStyles.baseMedia,
+                  baseEl && {
+                    width: baseW,
+                    height: baseH,
+                    position: 'absolute',
+                    left: (displayW / 2) - (baseW / 2),
+                    top: (displayH / 2) - (baseH / 2),
+                    transform: [
+                      { translateX: (baseEl.x || 0) * scaleX },
+                      { translateY: (baseEl.y || 0) * scaleY },
+                      { scale: (baseEl.scale || 1) * scaleX },
+                      { rotate: `${baseEl.rotate || 0}deg` }
+                    ]
+                  }
+                ]}
+                contentFit="cover"
+                nativeControls={false}
+              />
           ) : (
             <Image
               source={{ uri: resolveMediaUrl(currentStory.media_url) }}
@@ -820,9 +831,7 @@ export default function StoryViewerScreen() {
             disabled={isReshared}
             onPress={() => {
               setIsPaused(true);
-              if (videoRef.current) {
-                videoRef.current.pauseAsync();
-              }
+              player.pause();
               router.replace(`/create-story?refId=${currentStory._id || currentStory.id}`);
             }}
           >
@@ -1033,6 +1042,7 @@ export default function StoryViewerScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+      <PerformanceOverlay />
     </View>
   );
 }
@@ -1216,13 +1226,13 @@ const viewerStyles = StyleSheet.create({
     height: 140,
   },
   imgExtra: {
-    width: 200,
-    height: 280,
+    width: scale(200),
+    height: verticalScale(280),
     borderRadius: 20,
   },
   musicCard: {
-    width: 220,
-    height: 75,
+    width: scale(220),
+    height: verticalScale(75),
     borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',

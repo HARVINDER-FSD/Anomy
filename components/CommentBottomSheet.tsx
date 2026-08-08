@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity, FlatList,
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -23,11 +23,12 @@ interface CommentBottomSheetProps {
   onClose: () => void;
   postId: string;
   postOwnerId?: string;
+  commentsDisabled?: boolean;
   onCommentAdded?: (count: number) => void;
 }
 
 export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
-  isVisible, onClose, postId, postOwnerId, onCommentAdded
+  isVisible, onClose, postId, postOwnerId, commentsDisabled = false, onCommentAdded
 }) => {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -99,6 +100,12 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
     const handleNewComment = (newComment: any) => {
       if (newComment.user_id === currentUserId) return;
 
+      // 🛡️ STRONG BOUNDARY: Only show comments matching current mode
+      const isAnonComment = !!newComment.is_anonymous || !!newComment.isAnonymous || !!newComment.anonymous;
+      const currentModeIsAnon = user?.isAnonymousMode;
+      
+      if (isAnonComment !== currentModeIsAnon) return;
+
       if (newComment.parent_comment_id) {
         setPosts(prev => prev.map(c => {
           const cId = c._id || c.id;
@@ -148,7 +155,6 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
       setHasMore(res.data.pagination?.hasNext || false);
       setPage(pageNum);
     } catch (err) {
-      console.error('Fetch comments error:', err);
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -156,12 +162,13 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
   }, [postId, sortBy]);
 
   const handlePostComment = useCallback(async () => {
-    if (!inputText.trim() || submitting) return;
+    if (!inputText.trim() || submitting || commentsDisabled) return;
     setSubmitting(true);
     try {
       const res = await apiClient.post(`/posts/${postId}/comments`, {
         content: inputText.trim(),
-        parent_comment_id: replyTo?.id
+        parent_comment_id: replyTo?.id,
+        is_anonymous: user?.isAnonymousMode ? 'true' : 'false' // Explicitly send mode
       });
 
       const newComment = res.data.data.comment;
@@ -192,7 +199,7 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
     } finally {
       setSubmitting(false);
     }
-  }, [postId, inputText, submitting, replyTo, onCommentAdded]);
+  }, [postId, inputText, submitting, replyTo, onCommentAdded, commentsDisabled]);
 
   const handleTogglePin = useCallback(async (commentId: string) => {
     if (!commentId || commentId === 'undefined') return;
@@ -217,7 +224,6 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
-      console.error('Pin error:', err);
       Alert.alert('Error', 'Could not update pin status');
     }
   }, [postId]);
@@ -287,7 +293,6 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
        if (onCommentAdded) onCommentAdded(-1);
      } catch (err) {
-       console.error('Delete error:', err);
        // Silent fail or minimal toast if needed, but keeping original error handle logic
        // Alert.alert('Error', 'Could not delete comment');
      }
@@ -304,11 +309,26 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
     const itemId = item._id || item.id;
     const isMenuOpen = activeMenuId === itemId;
 
+    // 🛡️ Determine if we should show real identity or ghost identity for this comment
+    // If the comment is anonymous OR the user is in anonymous mode, we should be careful.
+    const isAnonymousComment = !!item.is_anonymous || !!item.isAnonymous || !!item.anonymous || user?.isAnonymousMode;
+    
+    const displayUsername = isAnonymousComment 
+      ? (isMyComment ? 'You (Ghost)' : 'Anonymous Ghost')
+      : (item.user?.username || 'AnuFy_User');
+
+    const displayAvatar = isAnonymousComment
+      ? resolveAvatarUrl(undefined, 'anonymous', true)
+      : resolveAvatarUrl(item.user?.avatar_url, item.user?.username);
+
     return (
       <View style={[styles.commentContainer, isReply && styles.replyContainer]}>
-        <TouchableOpacity onPress={() => router.push(`/user/${item.user?.username}`)}>
+        <TouchableOpacity 
+          disabled={isAnonymousComment && !isMyComment}
+          onPress={() => router.push(`/user/${item.user?.username}`)}
+        >
           <Image 
-            source={{ uri: resolveAvatarUrl(item.user?.avatar_url, item.user?.username) }} 
+            source={{ uri: displayAvatar }} 
             style={isReply ? styles.replyAvatar : styles.commentAvatar} 
           />
         </TouchableOpacity>
@@ -327,7 +347,7 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
               style={[styles.commentTextBubble, isMenuOpen && { backgroundColor: COLORS.surface + '99' }]}
             >
               <View style={styles.commentHeader}>
-                <Text style={styles.usernameText}>{item.user?.username}</Text>
+                <Text style={styles.usernameText}>{displayUsername}</Text>
                 {item.is_pinned && <MaterialCommunityIcons name="pin" size={12} color={COLORS.secondary} style={{marginLeft: 4}} />}
               </View>
               <Text style={styles.commentText}>{item.content}</Text>
@@ -371,7 +391,7 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
             <Text style={styles.actionText}>{timeAgo}</Text>
             {item.likes_count > 0 && <Text style={styles.actionTextBold}>{item.likes_count} likes</Text>}
             <TouchableOpacity onPress={() => {
-              setReplyTo({ id: parentId || itemId, username: item.user?.username });
+              setReplyTo({ id: parentId || itemId, username: displayUsername });
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }}>
               <Text style={styles.actionTextBold}>Reply</Text>
@@ -457,6 +477,12 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
           />
 
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+            {commentsDisabled && (
+              <View style={styles.disabledCommentsBar}>
+                <Ionicons name="chatbubble-outline" size={18} color={COLORS.subtitle} />
+                <Text style={styles.disabledCommentsText}>Comments are disabled for this post</Text>
+              </View>
+            )}
             {replyTo && (
               <View style={styles.replyingBar}>
                 <Text style={styles.replyingText}>Replying to @{replyTo.username}</Text>
@@ -466,34 +492,43 @@ export const CommentBottomSheet: React.FC<CommentBottomSheetProps> = ({
               </View>
             )}
             
-            <View style={styles.inputArea}>
-              <View style={styles.mainInputRow}>
-                <Image source={{ uri: resolveAvatarUrl(user?.avatar_url, user?.username) }} style={styles.inputAvatar} />
-                <TextInput
-                  style={styles.textInput}
-                  placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
-                  placeholderTextColor={COLORS.subtitle}
-                  value={inputText}
-                  onChangeText={setInputText}
-                  multiline
-                />
-                <TouchableOpacity 
-                  disabled={!inputText.trim() || submitting} 
-                  onPress={handlePostComment}
-                  style={styles.sendBtn}
-                >
-                  {submitting ? (
-                    <ActivityIndicator size="small" color={COLORS.secondary} />
-                  ) : (
-                    <Ionicons 
-                      name="arrow-up-circle" 
-                      size={32} 
-                      color={inputText.trim() ? COLORS.secondary : COLORS.border} 
-                    />
-                  )}
-                </TouchableOpacity>
+            {!commentsDisabled && (
+              <View style={styles.inputArea}>
+                <View style={styles.mainInputRow}>
+                  <Image 
+                    source={{ 
+                      uri: user?.isAnonymousMode 
+                        ? resolveAvatarUrl(undefined, 'anonymous', true)
+                        : resolveAvatarUrl(user?.avatar_url, user?.username) 
+                    }} 
+                    style={styles.inputAvatar} 
+                  />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
+                    placeholderTextColor={COLORS.subtitle}
+                    value={inputText}
+                    onChangeText={setInputText}
+                    multiline
+                  />
+                  <TouchableOpacity 
+                    disabled={!inputText.trim() || submitting} 
+                    onPress={handlePostComment}
+                    style={styles.sendBtn}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator size="small" color={COLORS.secondary} />
+                    ) : (
+                      <Ionicons 
+                        name="arrow-up-circle" 
+                        size={32} 
+                        color={inputText.trim() ? COLORS.secondary : COLORS.border} 
+                      />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
           </KeyboardAvoidingView>
         </Animated.View>
       </View>
@@ -596,6 +631,17 @@ const styles = StyleSheet.create({
   sendBtn: { marginLeft: 10 },
   replyingBar: { backgroundColor: COLORS.surface, padding: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   replyingText: { fontSize: 12, color: COLORS.subtitle },
+  disabledCommentsBar: { 
+    backgroundColor: COLORS.surface, 
+    padding: 12, 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border
+  },
+  disabledCommentsText: { fontSize: 14, color: COLORS.subtitle, fontWeight: '500' },
   emptyContainer: { alignItems: 'center', marginTop: 60 },
   emptyText: { fontSize: 18, fontWeight: 'bold', color: COLORS.text, marginTop: 12 },
   emptySub: { fontSize: 14, color: COLORS.subtitle, marginTop: 4 },

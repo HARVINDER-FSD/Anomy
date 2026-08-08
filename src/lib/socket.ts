@@ -1,34 +1,32 @@
-import { io, Socket } from 'socket.io-client';
+﻿import { io, Socket } from 'socket.io-client';
 import { getBaseUrl } from '../api/config';
 
 class SocketService {
   public socket: Socket | null = null;
-  private token: string | null = null;
-  private pendingRooms: string[] = []; // Queue for rooms to join after connect
+  private token: string | null;
+  private pendingRooms: string[]; // Queue for rooms to join after connect
+
+  constructor() {
+    this.token = null;
+    this.pendingRooms = [];
+  }
 
   connect(token: string) {
     if (this.socket?.connected && this.token !== token) {
-      console.log('🔄 Token changed, reconnecting socket...');
       this.disconnect();
     }
     this.token = token;
 
-    // ✅ Already connected — no need to reconnect
     if (this.socket?.connected) {
-      console.log('Socket already connected');
-      // Flush any pending room joins
       this._flushPendingRooms();
       return;
     }
 
-    // ✅ Already connecting — don't create a second socket
     if (this.socket && !this.socket.disconnected) {
-      console.log('Socket is already connecting...');
       return;
     }
 
     const url = getBaseUrl(false);
-    console.log('🔌 Connecting to socket at:', url);
 
     this.socket = io(url, {
       auth: { token },
@@ -39,17 +37,15 @@ class SocketService {
     });
 
     this.socket.on('connect', () => {
-      console.log('🚀 Socket connected:', this.socket?.id);
-      // ✅ Flush all rooms that were queued before connection was ready
       this._flushPendingRooms();
     });
 
-    this.socket.on('connect_error', (error) => {
-      console.error('❌ Socket connection error:', error.message);
+    this.socket.on('connect_error', (_error) => {
+      // Silent in production
     });
 
-    this.socket.on('disconnect', (reason) => {
-      console.warn('⚠️ Socket disconnected:', reason);
+    this.socket.on('disconnect', (_reason) => {
+      // Silent in production
     });
   }
 
@@ -57,7 +53,6 @@ class SocketService {
   private _flushPendingRooms() {
     while (this.pendingRooms.length > 0) {
       const chatId = this.pendingRooms.shift()!;
-      console.log(`📥 Flushing pending room join: ${chatId}`);
       this.socket?.emit('chat:join', { chatId });
     }
   }
@@ -75,7 +70,6 @@ class SocketService {
     if (this.socket?.connected) {
       this.socket.emit('chat:join', { chatId });
     } else {
-      console.log(`📌 Socket not ready — queuing room join: ${chatId}`);
       if (!this.pendingRooms.includes(chatId)) {
         this.pendingRooms.push(chatId);
       }
@@ -93,14 +87,14 @@ class SocketService {
     content: string;
     type?: string;
     mediaUrl?: string;
+    authorUsername?: string;
+    authorAvatar?: string;
     attachments?: Array<{ url: string; type: 'image' | 'video' | 'audio' | 'file' }>;
     replyTo?: string;
     tempMessageId?: string;
+    isVanish?: false | 'on_read' | '24h';
   }) {
-    if (!this.socket?.connected) {
-      console.warn('⚠️ Cannot send message: socket not connected');
-      return;
-    }
+    if (!this.socket?.connected) return;
     this.socket.emit('message:send', payload);
   }
 
@@ -112,8 +106,12 @@ class SocketService {
     this.socket?.emit('message:delete', payload);
   }
 
-  reactToMessage(payload: { messageId: string; chatId: string; emoji: string }) {
+  reactToMessage(payload: { messageId: string; chatId: string; emoji: string; forceAdd?: boolean }) {
     this.socket?.emit('message:react', payload);
+  }
+
+  removeReaction(payload: { messageId: string; chatId: string; emoji: string }) {
+    this.socket?.emit('message:remove_reaction', payload);
   }
 
   pinMessage(payload: { messageId: string; chatId: string; isPinned: boolean }) {
@@ -137,13 +135,28 @@ class SocketService {
     }
   }
 
+  // ✅ Generic event listener
+  on(event: string, callback: (...args: any[]) => void) {
+    this.socket?.on(event, callback);
+  }
+
+  // ✅ Generic event remover
+  off(event: string, callback?: (...args: any[]) => void) {
+    this.socket?.off(event, callback);
+  }
+
+  // ✅ Generic event emitter
+  emit(event: string, ...args: any[]) {
+    this.socket?.emit(event, ...args);
+  }
+
   // ✅ Query server for a user's live online status
   queryOnlineStatus(targetUserId: string) {
-    const emit = () => this.socket?.emit('user:status', { targetUserId });
+    const emitAction = () => this.socket?.emit('user:status', { targetUserId });
     if (this.socket?.connected) {
-      emit();
+      emitAction();
     } else {
-      this.socket?.once('connect', emit);
+      this.socket?.once('connect', emitAction);
     }
   }
 }

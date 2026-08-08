@@ -1,4 +1,4 @@
-import { useEditorStore } from '../store/editorStore';
+﻿import { useEditorStore } from '../store/editorStore';
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { apiClient } from '../api/client';
@@ -25,7 +25,7 @@ export const ExporterService = {
     }
     
     // 3. LAYER FILTER ENGINE 
-    let filters = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[vbase];`;
+    let filters = `[0:v]scale=w=trunc(min(1080\\,iw*1920/ih)/2)*2:h=trunc(min(1920\\,ih*1080/iw)/2)*2[vbase];`;
     
     // Text/Sticker Overlay
     layers.forEach((layer, index) => {
@@ -71,7 +71,7 @@ export const ExporterService = {
       // 2. Upload to Cloudinary
       const formData = new FormData();
       formData.append('file', {
-        uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
+        uri: uri,
         type: type === 'video' ? 'video/mp4' : 'image/jpeg',
         name: type === 'video' ? 'video.mp4' : 'image.jpg',
       } as any);
@@ -89,13 +89,12 @@ export const ExporterService = {
       const data = await res.json();
       return data.secure_url || null;
     } catch (e) {
-      console.error('[uploadToCloudinary] Error:', e);
       return null;
     }
   },
 
   startExport: async () => {
-    const { clips, layers, activeMusic } = useEditorStore.getState();
+    const { clips, layers, activeMusic, isMuted } = useEditorStore.getState();
     if (!clips.length) return false;
 
     try {
@@ -109,7 +108,6 @@ export const ExporterService = {
       }));
 
       if (processedClips.some(c => !c.remoteUri)) {
-        console.warn('[ExporterService] Some clips failed to upload');
         return clips[0].uri; // Fallback
       }
 
@@ -128,7 +126,8 @@ export const ExporterService = {
         clips: processedClips.map(c => ({
           url: c.remoteUri,
           trimStartMs: c.trimStart,
-          trimEndMs: c.trimEnd
+          trimEndMs: c.trimEnd,
+          mute: isMuted // 🚀 Pass mute status to backend
         })),
         layers: processedLayers.map(l => ({
           type: l.type,
@@ -143,17 +142,21 @@ export const ExporterService = {
         music: activeMusic ? {
           url: activeMusic.url,
           trimStartMs: activeMusic.trimStart ?? 0,
-          volume: activeMusic.volume ?? 1
+          volume: activeMusic.volume ?? 1,
+          songName: activeMusic.songName || 'Unknown Song',
+          artist: activeMusic.artist || 'Unknown Artist'
         } : undefined,
         output: { width: 1080, height: 1920, fps: 30, format: 'mp4' }
       };
 
       const res = await apiClient.post('/exports/shot', payload);
-      const url = res?.data?.data?.videoUrl;
       
-      if (url) return url;
-    } catch (e) {
-      console.error('[ExporterService] Server-side export failed, falling back:', e);
+      if (res.data?.success) {
+        const url = res.data.data?.videoUrl;
+        if (url) return url;
+      }
+      
+    } catch (e: any) {
     }
 
     return clips[0].uri;
