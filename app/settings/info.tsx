@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/src/theme/colors';
 import { scale, verticalScale, moderateScale, moderateFont } from '@/src/utils/responsive';
-import { AdBanner } from '@/components/AdBanner';
 
 export default function InfoScreen() {
   const COLORS = useAppTheme();
@@ -23,7 +23,10 @@ export default function InfoScreen() {
       paddingVertical: verticalScale(12),
       borderBottomWidth: 0.5,
       borderBottomColor: COLORS.border,
-      paddingTop: Platform.OS === 'ios' ? verticalScale(45) : verticalScale(40),
+      paddingTop: verticalScale(6),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     headerTitle: {
       fontSize: moderateFont(18),
@@ -35,6 +38,9 @@ export default function InfoScreen() {
     content: {
       paddingHorizontal: scale(20),
       paddingTop: verticalScale(20),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     policyText: {
       fontSize: moderateFont(14),
@@ -180,7 +186,6 @@ export default function InfoScreen() {
       </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {renderContent()}
-        <AdBanner />
       </ScrollView>
     </SafeAreaView>
   );

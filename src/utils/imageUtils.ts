@@ -29,6 +29,11 @@ export const resolveAvatarUrl = (url?: string, username?: string, isAnonymous?: 
     resolved = resolved.replace('https://mybackenda.onrender.com', serverRoot);
   }
 
+  // Convert dicebear svg to png for mobile image rendering support
+  if (resolved.includes('dicebear.com') && resolved.includes('/svg')) {
+    resolved = resolved.replace('/svg', '/png');
+  }
+
   // If it's already an absolute URL (http/https) or base64 data, return it
   if (resolved.startsWith('http') || resolved.startsWith('data:')) {
     return resolved;

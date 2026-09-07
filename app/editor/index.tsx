@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Platform, StatusBar, ScrollView, Alert, Dimensions, Image, TextInput, ActivityIndicator, Vibration, PanResponder } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar, ScrollView, Alert, Dimensions, Image, TextInput, ActivityIndicator, Vibration, PanResponder } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -602,7 +603,7 @@ const styles = StyleSheet.create({
   verticalToolbar: {
     position: 'absolute',
     right: 15,
-    top: 60,
+    top: 12,
     zIndex: 100,
     gap: 15,
     alignItems: 'center',
@@ -613,7 +614,7 @@ const styles = StyleSheet.create({
   iconBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   toolLabel: { color: '#FFF', fontSize: 9, fontWeight: '900', textTransform: 'uppercase', textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 },
   
-  closeBtn: { position: 'absolute', top: 50, left: 20, width: 44, height: 44, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  closeBtn: { position: 'absolute', top: 12, left: 20, width: 44, height: 44, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
 
   timelineSection: { height: '10%', justifyContent: 'center' },
   timeLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 20 },

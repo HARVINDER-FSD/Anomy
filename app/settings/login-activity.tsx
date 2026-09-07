@@ -1,8 +1,9 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, SafeAreaView,
+  View, Text, StyleSheet, TouchableOpacity,
   ActivityIndicator, Alert, Platform, ScrollView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAppTheme } from '@/src/theme/colors';
@@ -161,7 +162,10 @@ export default function LoginActivityScreen() {
       paddingVertical: verticalScale(12),
       borderBottomWidth: 0.5,
       borderBottomColor: COLORS.border,
-      paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(45),
+      paddingTop: verticalScale(6),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     headerTitle: {
       fontSize: moderateFont(18),
@@ -174,6 +178,9 @@ export default function LoginActivityScreen() {
       paddingHorizontal: scale(16),
       paddingTop: verticalScale(20),
       paddingBottom: verticalScale(40),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
 
     // Section label

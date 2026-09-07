@@ -1,1518 +1,1533 @@
-﻿import React, { useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  RefreshControl,
   TouchableOpacity,
-  TextInput,
-  Modal,
-  Alert,
-  ActivityIndicator,
   Pressable,
-  FlatList,
-  Keyboard,
-  TouchableHighlight,
+  TextInput,
+  RefreshControl,
+  DeviceEventEmitter,
   ScrollView,
+  ActivityIndicator,
+  StatusBar,
+  Modal,
+  Animated,
+  Alert,
+  Platform,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Haptics from 'expo-haptics';
-import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { FlashList } from '@shopify/flash-list';
-const FastFlashList = FlashList as React.ComponentType<any>;
-import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
-import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
-import { useAppTheme } from '@/src/theme/colors';
-import { useAuthStore } from '@/src/store/authStore';
-import { useChatStore } from '@/src/store/chatStore';
-import { useNotificationStore } from '@/src/store/notificationStore';
-import { socketService } from '@/src/lib/socket';
-import { upsertIncomingMessage } from '@/src/lib/chatMessages';
-import { useCall } from '@/src/context/CallContext';
-import { useCallHistoryStore } from '@/src/store/callHistoryStore';
-import { FollowButton } from '@/src/components/common/FollowButton';
-import { useFollowStatus } from '@/src/hooks/useFollowStatus';
-import { ConversationListItem } from '@/components/messages/ConversationListItem';
-import { StoryBar } from '@/components/messages/StoryBar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { resolveAvatarUrl } from '@/src/utils/imageUtils';
-import { useSafeRouter } from '@/src/hooks/useSafeRouter';
-import { ChatListSkeleton } from '@/components/ui/SkeletonLoader';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { apiClient } from '@/src/api/client';
-import {
-  openChat,
-  prepareChatFromUser,
-  prefetchSearchResultChats,
-  prefetchChatMessages,
-  prefetchChatRoute,
-  warmChatIntent,
-} from '@/src/lib/chatNavigation';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
 
-type UserSearchResultRowProps = {
-  user: any;
-  existingConversation?: any;
-  colors: ReturnType<typeof useAppTheme>;
-  onPressIn: (user: any, existingConversation?: any) => void;
-  onPress: (user: any, existingConversation?: any) => void;
+// Internal Store & API Client Imports
+import { useChatStore, sortConversationsPinnedFirst } from '@/src/store/chatStore';
+import { useAuthStore } from '@/src/store/authStore';
+import { useAppTheme } from '@/src/theme/colors';
+import { socketService } from '@/src/lib/socket';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { resolveAvatarUrl } from '@/src/utils/imageUtils';
+import { clearConversationNotifications } from '@/src/components/NotificationManager';
+import { apiClient } from '@/src/api/client';
+
+// Helper to format relative time nicely
+const formatRelativeTime = (timeInput: any): string => {
+  if (!timeInput) return 'just now';
+  const date = new Date(timeInput);
+  if (isNaN(date.getTime())) return 'just now';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.max(0, Math.floor(diffMs / 1000));
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDay === 1) return 'yesterday';
+  if (diffDay < 7) return `${diffDay}d ago`;
+  
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-const UserSearchResultRow = React.memo(({ user, existingConversation, colors, onPressIn, onPress }: UserSearchResultRowProps) => {
-  const styles = getStyles(colors);
-  const uUsername = user.username || '';
-  const uAvatar = user.avatar || '';
+// Initial Avatar Fallback Palette
+const INITIAL_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#6366F1'];
 
-  return (
-    <TouchableHighlight
-      style={styles.userSearchRow}
-      underlayColor={colors.surface}
-      onPressIn={() => onPressIn(user, existingConversation)}
-      onPress={() => onPress(user, existingConversation)}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-        <Image
-          source={{ uri: resolveAvatarUrl(uAvatar, uUsername, false) }}
-          style={styles.searchUserAvatar}
-          contentFit="cover"
-          transition={0}
-          cachePolicy="memory-disk"
-        />
-        <View style={{ flex: 1, marginLeft: 14 }}>
-          <Text style={styles.searchUserUsername}>@{uUsername}</Text>
-          {user.name ? <Text style={styles.searchUserName}>{user.name}</Text> : null}
-        </View>
-      </View>
-    </TouchableHighlight>
-  );
-});
+const getInitialBg = (name: string) => {
+  if (!name) return INITIAL_COLORS[0];
+  let charCode = 0;
+  for (let i = 0; i < name.length; i++) {
+    charCode += name.charCodeAt(i);
+  }
+  return INITIAL_COLORS[charCode % INITIAL_COLORS.length];
+};
 
+// 🎯 Safe Message Content Formatter (Translates URLs/Media types to clean labels like "🖼️ Post", "📷 Photo")
+const formatMessageContent = (lastMsg: any): string => {
+  if (!lastMsg) return 'Active now';
+  if (lastMsg.is_deleted) return 'Message deleted';
+
+  const mt = (lastMsg.message_type || lastMsg.type || '').toLowerCase();
+  const content = typeof lastMsg.content === 'string' ? lastMsg.content.trim() : '';
+
+  if (mt === 'image' || lastMsg.media_type === 'image') return '📷 Photo';
+  if (mt === 'video' || lastMsg.media_type === 'video') return '🎥 Video';
+  if (mt === 'audio' || lastMsg.media_type === 'audio') return '🎵 Voice note';
+  if (mt === 'sticker') return content || '✨ Sticker';
+  if (
+    mt === 'shot_share' ||
+    mt === 'reel_share' ||
+    mt === 'reel' ||
+    content.includes('/reels/') ||
+    content.includes('/shot/') ||
+    content.includes('anufy.app/reels/') ||
+    content.includes('anufy.app/shot/')
+  ) {
+    return '📽️ Reel';
+  }
+  if (
+    mt === 'post_share' ||
+    mt === 'post' ||
+    content.includes('/post/') ||
+    content.includes('/posts/') ||
+    content.includes('anufy.app/post/')
+  ) {
+    return '🖼️ Post';
+  }
+  if (
+    mt === 'profile_share' ||
+    mt === 'profile' ||
+    content.includes('/user/') ||
+    content.includes('anufy.app/user/')
+  ) {
+    return '👤 Profile';
+  }
+  if (mt === 'lottie_voice') return '✨ Voice sticker';
+  if (mt === 'story_reply') return '↩️ Story reply';
+  if (content.startsWith('http://') || content.startsWith('https://')) return '🔗 Link';
+  return content || 'Active now';
+};
+
+const EMPTY_CONVERSATIONS: any[] = [];
+
+// ------------------------------------------------------------
+// MESSAGES SCREEN - 100% REAL BACKEND INTEGRATION
+// ------------------------------------------------------------
 export default function MessagesScreen() {
-  const COLORS = useAppTheme();
-  const styles = getStyles(COLORS);
+  const theme = useAppTheme();
   const router = useSafeRouter();
-  const insets = useSafeAreaInsets();
-  const user = useAuthStore((s) => s.user);
-  const myId = user?.id || '';
-  const isAnonymous = user?.isAnonymousMode === true;
-  const switchMode = useChatStore((s) => s.switchMode);
-  // 🛡️ IRONCLAD MODE WALL: Frame #1 0ms selector reads mode-isolated array directly
-  const rawConversations = useChatStore((s) =>
-    isAnonymous ? (s.anonymousConversations || []) : (s.normalConversations || [])
-  );
-  const conversations = React.useMemo(() => {
-    return (rawConversations || []).filter((c: any) =>
-      isAnonymous ? (c.is_anonymous === true) : (c.is_anonymous !== true)
-    );
-  }, [rawConversations, isAnonymous]);
+  const currentUser = useAuthStore((state: any) => state.user);
+  const myId = (currentUser?._id || currentUser?.id)?.toString();
 
-  const refreshConversations = useChatStore((s) => s.refreshConversations);
+  // Global App Mode Detection
+  const isAnonymousMode = useAuthStore((state: any) => !!state.user?.isAnonymousMode);
 
-  React.useEffect(() => {
-    if (typeof switchMode === 'function') {
-      switchMode(isAnonymous);
-    }
-  }, [isAnonymous, switchMode]);
+  // Real Chat Store State (Stable Selectors)
+  const normalConversations = useChatStore((state: any) => state.normalConversations) || EMPTY_CONVERSATIONS;
+  const anonymousConversations = useChatStore((state: any) => state.anonymousConversations) || EMPTY_CONVERSATIONS;
+  const rawConversations = isAnonymousMode ? anonymousConversations : normalConversations;
 
-  // Handle Real-time Sync for Conversations and Account Deletions
-  React.useEffect(() => {
-    const socket = socketService.socket;
-    if (!socket) return;
-    
-    const handleRefresh = () => {
-      refreshConversations(myId, isAnonymous);
-    };
+  // Component State
+  const [headerTab, setHeaderTab] = useState<'chats' | 'calls'>('chats');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchedUsers, setSearchedUsers] = useState<any[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [suggestedUsers, setSuggestedUsers] = useState<any[]>([]);
+  const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
 
-    socket.on('conversation:created', handleRefresh);
-    socket.on('user:deleted', handleRefresh);
-
-    return () => {
-      socket.off('conversation:created', handleRefresh);
-      socket.off('user:deleted', handleRefresh);
-    };
-  }, [myId, isAnonymous, refreshConversations]);
-
-  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount);
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [typingMap, setTypingMap] = React.useState<Record<string, boolean>>({});
-  const [isLoading, setIsLoading] = React.useState(() => {
-    const storeState = useChatStore.getState();
-    const cachedConvs = isAnonymous ? storeState.anonymousConversations : storeState.normalConversations;
-    // Don't show loading if a skip just happened — conversations being empty is intentional
-    const lastSkip = storeState.lastSkipTs;
-    const skipJustHappened = lastSkip && (Date.now() - lastSkip) < 8000;
-    if (skipJustHappened) return false;
-    return !cachedConvs || cachedConvs.length === 0;
-  });
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [localSearchQuery, setLocalSearchQuery] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<'chats' | 'calls'>('chats');
-  
-  // Pagination State
-  const [chatPage, setChatPage] = React.useState(1);
-  const [hasMoreChats, setHasMoreChats] = React.useState(true);
-  const [loadingMoreChats, setLoadingMoreChats] = React.useState(false);
-  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
-
-  const lastLoadTimeRef = useRef<number>(0);
-  const isFetchingRef = useRef<boolean>(false);
-  const skipSuppressUntilRef = useRef<number>(0); // Block ALL reloads briefly after anonymous skip
-  const DATA_FRESHNESS_MS = 30000; // Consider data fresh for 30 seconds
-  
-  const callLogs = useCallHistoryStore((s) => s.callLogs);
-  const { startCall } = useCall();
-
-  // Suggestions state
-  const [suggestedUsers, setSuggestedUsers] = React.useState<any[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = React.useState(false);
-  const [dismissedUserIds, setDismissedUserIds] = React.useState<string[]>([]);
-
-  // Load dismissed suggestions on mount
+  // Debounced Global User Search
   useEffect(() => {
-    const loadDismissed = async () => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchedUsers([]);
+      setIsSearchingUsers(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
       try {
-        const stored = await AsyncStorage.getItem('dismissed_suggestions');
-        if (stored) {
-          setDismissedUserIds(JSON.parse(stored));
-        }
-      } catch (err) {
+        setIsSearchingUsers(true);
+        const { data } = await apiClient.get(`/users/search?q=${encodeURIComponent(query)}`);
+        const list = Array.isArray(data) ? data : (data?.data || data?.users || []);
+        // Filter out my own user
+        setSearchedUsers(list.filter((u: any) => (u.id || u._id)?.toString() !== myId));
+      } catch (e) {
+        setSearchedUsers([]);
+      } finally {
+        setIsSearchingUsers(false);
       }
-    };
-    void loadDismissed();
+    }, 220);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, myId]);
+
+  // Focus Effect - Sync Conversations on Screen Focus
+  useFocusEffect(
+    useCallback(() => {
+      useChatStore.getState().switchMode(isAnonymousMode);
+      useChatStore.getState().refreshConversations(isAnonymousMode);
+    }, [isAnonymousMode])
+  );
+
+  // Listen to Mode Switch Events
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('mode_switched', (evt: any) => {
+      const anon = !!evt?.isAnonymous;
+      useChatStore.getState().switchMode(anon);
+      useChatStore.getState().refreshConversations(anon);
+    });
+    return () => sub.remove();
   }, []);
 
-  const fetchSuggestions = useCallback(async () => {
-    if (!user?.id) return; // Don't fetch if user is not authenticated
+  // Fetch REAL Suggested Users & REAL Stories from Backend API
+  const [realStories, setRealStories] = useState<any[]>([]);
+
+  const fetchRealStories = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get('/stories');
+      const list = Array.isArray(data) ? data : (data?.data || data?.stories || []);
+      setRealStories(list);
+    } catch (e) {
+      setRealStories([]);
+    }
+  }, []);
+
+  const fetchSuggestedUsers = useCallback(async () => {
     try {
       setLoadingSuggestions(true);
-      const res = await apiClient.get('/users/suggestions?limit=15');
-      const data = res.data?.data || res.data?.users || res.data || [];
-
-      // Load current dismissed suggestions directly to avoid state lag
-      let dismissedList: string[] = [];
-      try {
-        const stored = await AsyncStorage.getItem('dismissed_suggestions');
-        if (stored) {
-          dismissedList = JSON.parse(stored);
-        }
-      } catch (e) {}
-
-      const activeList = (Array.isArray(data) ? data : []).filter(
-        (u: any) => !dismissedList.includes((u._id || u.id)?.toString())
-      );
-      setSuggestedUsers(activeList);
-    } catch (err) {
+      const { data } = await apiClient.get('/users/suggestions?limit=6');
+      const list = Array.isArray(data) ? data : (data?.data || []);
+      setSuggestedUsers(list);
+    } catch (e) {
+      setSuggestedUsers([]);
     } finally {
       setLoadingSuggestions(false);
     }
-  }, [user?.id]);
-
-
-
-  const dismissSuggestion = async (sugId: string) => {
-    const stringId = sugId.toString();
-    setSuggestedUsers(prev => prev.filter(u => (u._id || u.id)?.toString() !== stringId));
-    
-    // Save to persistent storage
-    try {
-      const stored = await AsyncStorage.getItem('dismissed_suggestions');
-      let currentList: string[] = stored ? JSON.parse(stored) : [];
-      if (!currentList.includes(stringId)) {
-        currentList.push(stringId);
-        await AsyncStorage.setItem('dismissed_suggestions', JSON.stringify(currentList));
-        setDismissedUserIds(currentList);
-      }
-    } catch (err) {
-    }
-  };
-
-  // Debounce input to prevent lagging the keyboard on every keystroke
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchQuery(localSearchQuery);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [localSearchQuery]);
-
-  const formatDuration = (seconds: number) => {
-    if (seconds === 0) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    if (mins > 0) {
-      return `${mins}m ${secs}s`;
-    }
-    return `${secs}s`;
-  };
-
-  const formatLogDate = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    
-    // Check if today
-    if (date.toDateString() === now.toDateString()) {
-      return `Today, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    }
-    
-    // Check if yesterday
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    if (date.toDateString() === yesterday.toDateString()) {
-      return `Yesterday, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    }
-    
-    // Otherwise show date and time
-    return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-  };
-
-  const renderCallLogItem = useCallback(({ item }: { item: any }) => {
-    const isOutgoing = item.direction === 'outgoing';
-    const isConnected = item.status === 'connected';
-    
-    // Icon color: Green for connected calls, Red for missed/failed/declined calls
-    const iconColor = isConnected ? '#34C759' : '#FF3B30';
-    const callIcon = isOutgoing ? 'arrow-up-outline' : 'arrow-down-outline' as const;
-
-    return (
-      <View style={styles.callRow}>
-        <Image
-          source={{ uri: resolveAvatarUrl(item.avatar, item.username, false) }}
-          style={styles.callUserAvatar}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-        
-        <View style={styles.callInfoContainer}>
-          <Text style={styles.callUsername}>@{item.username}</Text>
-          
-          <View style={styles.callDetailsRow}>
-            <Ionicons name={callIcon} size={15} color={iconColor} style={{ marginRight: 4 }} />
-            <Text style={styles.callSubtitle}>
-              {isOutgoing ? 'Outgoing' : 'Incoming'} • {formatLogDate(item.timestamp)}
-              {isConnected && item.duration > 0 ? ` (${formatDuration(item.duration)})` : ` • ${item.status === 'no_answer' ? 'No Answer' : item.status === 'declined' ? 'Declined' : 'Missed'}`}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.callActions}>
-          <TouchableOpacity 
-            style={[styles.callActionBtn, { backgroundColor: COLORS.surface }]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              startCall(item.userId, item.username, item.avatar, item.type === 'video');
-            }}
-          >
-            <Ionicons 
-              name={item.type === 'video' ? 'videocam-outline' : 'call-outline'} 
-              size={20} 
-              color={COLORS.text} 
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }, [COLORS, styles]);
-
-  const [requestCount, setRequestCount] = React.useState(0);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  // User search states for starting new chats
-  const [searchResults, setSearchResults] = React.useState<any[]>([]);
-  const [searchLoading, setSearchLoading] = React.useState(false);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const searchUsers = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    try {
-      setSearchLoading(true);
-      const res = await apiClient.get(`/users/search?q=${encodeURIComponent(query)}`);
-      // Filter out myself from search results
-      const filtered = (res.data || []).filter((u: any) => (u.id || u._id)?.toString() !== myId);
-      setSearchResults(filtered);
-    } catch (err) {
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [myId]);
-
-  useEffect(() => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    searchTimeoutRef.current = setTimeout(() => {
-      searchUsers(searchQuery);
-    }, 400); // 400ms debounce
-    return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    };
-  }, [searchQuery, searchUsers]);
-
-  // Group creation states
-  const [showCreateGroupModal, setShowCreateGroupModal] = React.useState(false);
-  const [groupName, setGroupName] = React.useState('');
-  const [followingUsers, setFollowingUsers] = React.useState<any[]>([]);
-  const [loadingFollowing, setLoadingFollowing] = React.useState(false);
-  const [selectedParticipants, setSelectedParticipants] = React.useState<Set<string>>(new Set());
-  const [groupSearchQuery, setGroupSearchQuery] = React.useState('');
-  const [creatingGroup, setCreatingGroup] = React.useState(false);
-
-  const fetchFollowing = useCallback(async () => {
-    if (!myId) return;
-    try {
-      setLoadingFollowing(true);
-      const res = await apiClient.get(`/users/${myId}/following`);
-      setFollowingUsers(res.data?.data || res.data || []);
-    } catch (err) {
-    } finally {
-      setLoadingFollowing(false);
-    }
-  }, [myId]);
-
-  useEffect(() => {
-    if (showCreateGroupModal) {
-      fetchFollowing();
-      setSelectedParticipants(new Set());
-      setGroupName('');
-      setGroupSearchQuery('');
-    }
-  }, [showCreateGroupModal, fetchFollowing]);
-
-  const toggleParticipant = (userId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedParticipants(prev => {
-      const next = new Set(prev);
-      if (next.has(userId)) {
-        next.delete(userId);
-      } else {
-        next.add(userId);
-      }
-      return next;
-    });
-  };
-
-  const filteredGroupUsers = useMemo(() => {
-    if (!groupSearchQuery.trim()) return followingUsers;
-    const lower = groupSearchQuery.toLowerCase();
-    return followingUsers.filter(u =>
-      (u.username || '').toLowerCase().includes(lower) ||
-      (u.fullName || u.full_name || '').toLowerCase().includes(lower)
-    );
-  }, [followingUsers, groupSearchQuery]);
-
-  const handleCreateGroup = async () => {
-    if (!groupName.trim()) {
-      Alert.alert('Required', 'Please enter a group name.');
-      return;
-    }
-    if (selectedParticipants.size < 2) {
-      Alert.alert('Required', 'Please select at least 2 participants.');
-      return;
-    }
-
-    try {
-      setCreatingGroup(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const participantIds = Array.from(selectedParticipants);
-      const res = await apiClient.post('/chat/conversations/group', {
-        name: groupName.trim(),
-        participantIds
-      });
-
-      const newConv = res.data;
-      const convId = newConv?._id || newConv?.id;
-      if (convId) {
-        useChatStore.getState().setConversations([newConv, ...conversations]);
-        setShowCreateGroupModal(false);
-        router.push(`/chat/${convId}` as any);
-      } else {
-        Alert.alert('Error', 'Failed to create group.');
-      }
-    } catch (err: any) {
-      Alert.alert('Error', err.response?.data?.message || 'Could not create group conversation.');
-    } finally {
-      setCreatingGroup(false);
-    }
-  };
-
-  const load = useCallback(async (forceRefresh = false) => {
-    const now = Date.now();
-    // 🚫 Block ALL reloads (including forced) within the skip suppression window
-    if (now < skipSuppressUntilRef.current) {
-      return;
-    }
-    // Skip if data is fresh and not forcing refresh
-    if (!forceRefresh && !isFetchingRef.current && lastLoadTimeRef.current > 0 && (now - lastLoadTimeRef.current) < DATA_FRESHNESS_MS) {
-      return;
-    }
-
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-
-    try {
-      if (!isAnonymous && user?.id) {
-        void apiClient.get('/users/message-requests')
-          .then(res => {
-            if (res?.data?.success && Array.isArray(res?.data?.data)) {
-              setRequestCount(res.data.data.length);
-            }
-          })
-          .catch(() => {
-            // Quietly ignore transient auth refresh errors
-          });
-      }
-      if (user?.id) {
-        await Promise.allSettled([
-          refreshConversations(user?.isAnonymousMode),
-          fetchUnreadCount()
-        ]);
-      }
-      const now = Date.now();
-      lastLoadTimeRef.current = now;
-      setChatPage(1);
-      setHasMoreChats(true);
-
-      // If active conversations count < 10, fetch suggestions
-      const currentConvs = useChatStore.getState().conversations || [];
-      if (!isAnonymous && currentConvs.length < 10) {
-        void fetchSuggestions();
-      }
-    } finally {
-      setIsLoading(false);
-      setRefreshing(false);
-      isFetchingRef.current = false;
-    }
-  }, [refreshConversations, fetchUnreadCount, myId, isAnonymous, isLoading, fetchSuggestions, user?.id]);
-
-  useFocusEffect(
-    useCallback(() => {
-      // Sync skip suppression from chatStore (covers cross-screen navigation,
-      // e.g. User B was in chatroom when skip happened — their local ref was never set)
-      const lastSkip = (useChatStore.getState() as any).lastSkipTs;
-      if (lastSkip) {
-        const suppressUntil = lastSkip + 8000;
-        if (Date.now() < suppressUntil && suppressUntil > skipSuppressUntilRef.current) {
-          skipSuppressUntilRef.current = suppressUntil;
-        }
-      }
-
-      performanceEngine.startScreenTrace('MessagesScreen');
-      const cachedConvs = useChatStore.getState().conversations || [];
-      const hasCache = cachedConvs.length > 0;
-      performanceEngine.trackCacheAccess('Chat', hasCache);
-      performanceEngine.endScreenTrace('MessagesScreen', hasCache);
-
-      const withinSuppressWindow = Date.now() < skipSuppressUntilRef.current;
-      if (withinSuppressWindow) {
-        // Skip just happened — don't reload, and make sure loading spinner is off
-        setIsLoading(false);
-      } else {
-        void load(false); // Use cache if fresh, fetch in background if stale
-      }
-
-      const token = useAuthStore.getState().token;
-      if (token && !socketService.socket?.connected) {
-        socketService.connect(token);
-      }
-
-      // Only prefetch if data is stale (more than 30 seconds old)
-      const now = Date.now();
-      if (!lastLoadTimeRef.current || (now - lastLoadTimeRef.current) > DATA_FRESHNESS_MS) {
-        const convs = useChatStore.getState().conversations || [];
-        convs.slice(0, 3).forEach((c: any) => {
-          const cid = (c._id || c.id)?.toString();
-          if (cid) prefetchChatMessages(cid);
-        });
-        prefetchChatRoute(router);
-      }
-
-      // Clear search query and results when returning to Messages screen
-      setLocalSearchQuery('');
-      setSearchQuery('');
-      setSearchResults([]);
-    }, [load])
-  );
-
-  const prevModeRef = useRef(user?.isAnonymousMode);
-  
-  useEffect(() => {
-    if (prevModeRef.current !== user?.isAnonymousMode) {
-      const isAnon = user?.isAnonymousMode === true;
-
-      // 🛡️ HARD TRANSIENT STATE RESET: Clear search queries, results, and transient state
-      setLocalSearchQuery('');
-      setSearchQuery('');
-      setSearchResults([]);
-      setTypingMap({});
-      setActiveTab('chats');
-
-      // 1. Switch the visible list immediately from existing cache
-      if (typeof switchMode === 'function') {
-        switchMode(isAnon);
-      }
-
-      const storeState = useChatStore.getState();
-      const cached = isAnon ? storeState.anonymousConversations : storeState.normalConversations;
-      const hasFreshCache = cached && cached.length > 0;
-
-      if (hasFreshCache) {
-        // ✅ Cache exists — show instantly, refresh silently in background
-        setIsLoading(false);
-        // Background refresh without showing loading spinner
-        setTimeout(() => { void load(false); }, 300);
-      } else {
-        // ❌ Cache empty — show loading and fetch
-        setIsLoading(true);
-        void load(true);
-      }
-
-      prevModeRef.current = user?.isAnonymousMode;
-    }
-  }, [user?.isAnonymousMode, load, switchMode]);
-
-  useEffect(() => {
-    const bump = () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        void load(true); // Background sync
-      }, 100); // Fast 100ms background sync
-    };
-
-    const handleMessageOrConvUpdated = (data: any) => {
-      if (!data) return;
-      const convId = (data.conversationId || data.conversation_id || data.id || data.last_message?.conversation_id)?.toString();
-      if (!convId) {
-        bump();
-        return;
-      }
-
-      // A clear/delete action marks the user as left_at on the backend, so keep
-      // this conversation out of local search/open-chat mapping immediately.
-      if ('last_message' in data && data.last_message === null && (data.unread_count ?? 0) === 0) {
-        useChatStore.getState().removeConversation(convId);
-        bump();
-        return;
-      }
-
-      const nowIso = data.created_at || data.updated_at || new Date().toISOString();
-      const currentConvs: any[] = useChatStore.getState().conversations || [];
-      const existingIdx = currentConvs.findIndex((c: any) => (c._id || c.id)?.toString() === convId);
-      const nextLastMsg = data.last_message || (data._id ? data : null);
-
-      // ⚡ INSTANT PRE-CACHE: Upsert incoming message into messagesCache so opening chatroom renders it IMMEDIATELY on frame 1!
-      if (nextLastMsg && typeof nextLastMsg === 'object' && (nextLastMsg.content || nextLastMsg.media_url || nextLastMsg.message_type)) {
-        const currentCache = useChatStore.getState().messagesCache?.[convId] || [];
-        const formattedMsg = {
-          ...nextLastMsg,
-          _id: (nextLastMsg._id || nextLastMsg.id)?.toString?.() || nextLastMsg._id,
-          conversation_id: convId,
-          created_at: nextLastMsg.created_at || nowIso
-        };
-        const updatedCache = upsertIncomingMessage(currentCache, formattedMsg);
-        useChatStore.getState().setCachedMessages(convId, updatedCache);
-      }
-
-      if (existingIdx >= 0) {
-        const existing = currentConvs[existingIdx];
-        const updatedConv = {
-          ...existing,
-          last_message: nextLastMsg ? {
-            ...nextLastMsg,
-            created_at: nextLastMsg.created_at || nowIso
-          } : existing.last_message,
-          updated_at: nowIso,
-          unread_count: typeof data.unread_count === 'number' ? data.unread_count : ((existing.unread_count || 0) + 1)
-        };
-
-        // Move updated card to position 0 (top of conversation list)
-        const otherConvs = currentConvs.filter((_, idx) => idx !== existingIdx);
-        useChatStore.getState().setConversations([updatedConv, ...otherConvs]);
-      } else {
-        // New incoming conversation from someone not yet in list — place at top immediately!
-        const newPlaceholder = {
-          _id: convId,
-          id: convId,
-          updated_at: nowIso,
-          unread_count: 1,
-          last_message: data.last_message || (data._id ? data : null),
-          participants: data.participants || []
-        };
-        useChatStore.getState().setConversations([newPlaceholder, ...currentConvs]);
-      }
-
-      bump();
-    };
-
-    const handleMessagesRead = (data: any) => {
-      if (!data || !data.conversationId) return;
-      const convId = data.conversationId.toString();
-      const nowIso = data.readAt || data.read_at || new Date().toISOString();
-      const currentConvs: any[] = useChatStore.getState().conversations || [];
-      const existingIdx = currentConvs.findIndex((c: any) => (c._id || c.id)?.toString() === convId);
-
-      if (existingIdx >= 0) {
-        const existing = currentConvs[existingIdx];
-        const updatedLast = existing.last_message ? {
-          ...existing.last_message,
-          status: 'read',
-          readAt: nowIso,
-          read_at: nowIso,
-          read_by: [{ user_id: data.readBy || 'peer', read_at: nowIso }]
-        } : existing.last_message;
-
-        const updatedConv = {
-          ...existing,
-          unread_count: 0,
-          last_message: updatedLast,
-          updated_at: nowIso
-        };
-
-        const nextConvs = [...currentConvs];
-        nextConvs[existingIdx] = updatedConv;
-        useChatStore.getState().setConversations(nextConvs);
-      }
-    };
-
-    const handleChatTyping = (data: any) => {
-      if (data && data.chatId) {
-        setTypingMap(prev => ({
-          ...prev,
-          [data.chatId.toString()]: !!data.isTyping
-        }));
-      }
-    };
-
-    socketService.on('message:new', handleMessageOrConvUpdated);
-    socketService.on('conversation:updated', handleMessageOrConvUpdated);
-    socketService.on('messages:read', handleMessagesRead);
-    socketService.on('message:status_updated', handleMessagesRead);
-    socketService.on('chat:typing', handleChatTyping);
-    socketService.on('user:deleted', bump);
-    const handleUserOnlineStatus = (data: any, online: boolean) => {
-      const uid = (data?.userId || data?.id || data)?.toString();
-      if (!uid) return;
-      const currentConvs = useChatStore.getState().conversations || [];
-      const updated = currentConvs.map((c: any) => {
-        const parts = c.participants || [];
-        const matches = parts.some((p: any) => {
-          const pId = (p.user?._id || p.user?.id || p.user || p)?.toString();
-          return pId === uid;
-        });
-        if (matches) {
-          return {
-            ...c,
-            is_online: online,
-            participants: parts.map((p: any) => {
-              const pId = (p.user?._id || p.user?.id || p.user || p)?.toString();
-              if (pId === uid) {
-                return typeof p.user === 'object' ? { ...p, user: { ...p.user, is_online: online } } : { ...p, is_online: online };
-              }
-              return p;
-            })
-          };
-        }
-        return c;
-      });
-      useChatStore.getState().setConversations(updated);
-    };
-
-    const handleUserOnline = (data: any) => handleUserOnlineStatus(data, true);
-    const handleUserOffline = (data: any) => handleUserOnlineStatus(data, false);
-
-    socketService.on('user:online', handleUserOnline);
-    socketService.on('user:offline', handleUserOffline);
-
-    // Remove skipped anonymous conversation from chat list (no page reload)
-    const handleAnonymousSkip = (data: any) => {
-      const convId = typeof data === 'string' ? data : (data?.conversationId || data?.conversation_id || data?.id);
-      if (!convId) return;
-      // 1. Remove from local store instantly — no spinner
-      useChatStore.getState().removeConversation(convId.toString());
-      // 2. Block ALL reloads (even force-refreshes from socket events) for 5 seconds
-      //    This prevents the list from flickering/reloading after skip for both parties
-      skipSuppressUntilRef.current = Date.now() + 5000;
-      lastLoadTimeRef.current = Date.now();
-      // Cancel any pending debounce reload
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-    socketService.on('anonymous:skipped', handleAnonymousSkip);
-
-    return () => {
-      socketService.off('message:new', handleMessageOrConvUpdated);
-      socketService.off('conversation:updated', handleMessageOrConvUpdated);
-      socketService.off('messages:read', handleMessagesRead);
-      socketService.off('message:status_updated', handleMessagesRead);
-      socketService.off('chat:typing', handleChatTyping);
-      socketService.off('user:online', handleUserOnline);
-      socketService.off('user:offline', handleUserOffline);
-      socketService.off('anonymous:skipped', handleAnonymousSkip);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [load]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await load(true); // Force refresh on pull-to-refresh
-    } finally {
-      setRefreshing(false);
-    }
-  }, [load]);
-
-  const filteredConversations = useMemo(() => {
-    if (!Array.isArray(conversations)) return [];
-    
-    // Sort conversations: Pinned first, then sorted by last message time / updated_at time
-    const sorted = [...conversations].sort((a, b) => {
-      const aPinned = !!a.is_pinned;
-      const bPinned = !!b.is_pinned;
-      if (aPinned !== bPinned) {
-        return aPinned ? -1 : 1;
-      }
-      const aTime = new Date(a.last_message?.created_at || a.updated_at || a.created_at || 0).getTime();
-      const bTime = new Date(b.last_message?.created_at || b.updated_at || b.created_at || 0).getTime();
-      return bTime - aTime;
-    });
-
-    if (!searchQuery.trim()) return sorted;
-    const query = searchQuery.toLowerCase();
-    return sorted.filter((conv) => {
-      const parts = conv.participants || [];
-      return parts.some((p: any) => {
-        const u = p.user || p;
-        const uid = (u.id || u._id)?.toString();
-        if (uid === myId) return false;
-        const name = (u.username || u.anonymousPersona?.username || '').toLowerCase();
-        return name.includes(query);
-      });
-    });
-  }, [conversations, searchQuery, myId]);
-
-  const userIdToConversation = useMemo(() => {
-    const map = new Map<string, any>();
-    if (!Array.isArray(conversations)) return map;
-    for (const c of conversations) {
-      if (c.type === 'group') continue;
-      for (const p of c.participants || []) {
-        const pUserId = (p.user?._id || p.user)?.toString();
-        if (pUserId && pUserId !== myId) {
-          map.set(pUserId, c);
-          break;
-        }
-      }
-    }
-    return map;
-  }, [conversations, myId]);
-
-  useEffect(() => {
-    if (searchResults.length === 0) return;
-    prefetchSearchResultChats(searchResults, userIdToConversation);
-  }, [searchResults, userIdToConversation]);
-
-  const handleWarmUserChat = useCallback((u: any, existing?: any) => {
-    warmChatIntent(prepareChatFromUser(u, existing));
   }, []);
 
-  const handleOpenUserChat = useCallback((u: any, existing?: any) => {
-    const params = prepareChatFromUser(u, existing);
-    openChat(router, params);
-    requestAnimationFrame(() => {
-      Keyboard.dismiss();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  useEffect(() => {
+    fetchSuggestedUsers();
+    fetchRealStories();
+  }, []);
+
+  // Socket Event Handlers
+  useEffect(() => {
+    const handleStatusUpdate = (data: { userId: string; status: string }) => {
+      if (!data?.userId) return;
+      setOnlineUsers(prev => {
+        const next = new Set(prev);
+        if (data.status === 'online') {
+          next.add(data.userId.toString());
+        } else {
+          next.delete(data.userId.toString());
+        }
+        return next;
+      });
+    };
+
+    const handleNewMessage = () => {
+      useChatStore.getState().refreshConversations(isAnonymousMode);
+    };
+
+    const handleConversationDeleted = (data: any) => {
+      const cId = data?.conversationId || data?.id;
+      if (cId) {
+        useChatStore.getState().removeConversation(String(cId));
+      }
+    };
+
+    socketService.on('user_status_update', handleStatusUpdate);
+    socketService.on('message:received', handleNewMessage);
+    socketService.on('conversation:updated', handleNewMessage);
+    socketService.on('conversation:deleted', handleConversationDeleted);
+
+    return () => {
+      socketService.off('user_status_update', handleStatusUpdate);
+      socketService.off('message:received', handleNewMessage);
+      socketService.off('conversation:updated', handleNewMessage);
+      socketService.off('conversation:deleted', handleConversationDeleted);
+    };
+  }, [isAnonymousMode]);
+
+  // Refresh Handler
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      useChatStore.getState().refreshConversations(isAnonymousMode),
+      fetchSuggestedUsers(),
+    ]);
+    setRefreshing(false);
+  };
+
+  // Action Sheet State for Long-Press on Conversation
+  const [selectedConv, setSelectedConv] = useState<any>(null);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const slideAnim = useRef(new Animated.Value(300)).current;
+
+  const openActionSheet = useCallback((conv: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectedConv(conv);
+    setActionSheetVisible(true);
+    Animated.spring(slideAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 22,
+      stiffness: 220,
+    }).start();
+  }, [slideAnim]);
+
+  const closeActionSheet = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: 300,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(() => {
+      setActionSheetVisible(false);
+      setSelectedConv(null);
     });
-  }, [router]);
+  }, [slideAnim]);
 
-  const renderSearchListItem = useCallback(({ item }: { item: any }) => {
-    if (item.type === 'header') {
-      return (
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionHeaderTitle}>{item.title}</Text>
-        </View>
-      );
-    }
-    if (item.type === 'loading') {
-      return (
-        <View style={{ padding: 24, alignItems: 'center' }}>
-          <ActivityIndicator size="small" color={COLORS.primary} />
-        </View>
-      );
-    }
-    if (item.type === 'chat') {
-      const cid = (item.data?._id || item.data?.id)?.toString();
-      return <ConversationListItem item={item.data} currentUserId={myId} isTyping={!!typingMap[cid]} />;
-    }
-    if (item.type === 'user') {
-      return (
-        <UserSearchResultRow
-          user={item.data}
-          existingConversation={item.existing}
-          colors={COLORS}
-          onPressIn={handleWarmUserChat}
-          onPress={handleOpenUserChat}
-        />
-      );
-    }
-    return null;
-  }, [COLORS, styles.sectionHeader, styles.sectionHeaderTitle, myId, handleWarmUserChat, handleOpenUserChat]);
+  const handlePinAction = async () => {
+    if (!selectedConv) return;
+    const convId = (selectedConv._id || selectedConv.id)?.toString();
+    const isPinned = !!selectedConv.is_pinned;
+    closeActionSheet();
 
-  const renderListItem = useCallback(({ item }: { item: any }) => {
-    if (!searchQuery.trim()) {
-      if (item.type === 'chat') {
-        const cid = (item.data?._id || item.data?.id)?.toString();
-        return <ConversationListItem item={item.data} currentUserId={myId} isTyping={!!typingMap[cid]} />;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const res = await useChatStore.getState().pinConversation(convId, !isPinned);
+    if (!res?.success && res?.reason === 'limit_reached') {
+      Alert.alert('Pin Limit Reached', 'You can only pin up to 5 chats.');
+    }
+  };
+
+  const handleMuteAction = async () => {
+    if (!selectedConv) return;
+    const convId = (selectedConv._id || selectedConv.id)?.toString();
+    const isMuted = !!selectedConv.is_muted;
+    closeActionSheet();
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await useChatStore.getState().muteConversation(convId, !isMuted);
+  };
+
+  const handleDeleteAction = () => {
+    if (!selectedConv) return;
+    const conv = selectedConv;
+    const convId = (conv._id || conv.id)?.toString();
+    closeActionSheet();
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    useChatStore.getState().deleteConversation(convId);
+  };
+
+  // Filter Conversations with Strict Isolation Wall & Pinned Prioritization
+  const filteredConversations = useMemo(() => {
+    const list = (rawConversations || []).filter((conv: any) => {
+      if (!conv) return false;
+
+      const isConvAnon = conv.is_anonymous === true;
+      if (isAnonymousMode && !isConvAnon) return false;
+      if (!isAnonymousMode && isConvAnon) return false;
+
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const participants = conv.participants || [];
+        const matchesName = participants.some((p: any) => {
+          const u = p.user || p || {};
+          const name = isAnonymousMode
+            ? (u.ghost_persona?.name || u.full_name || '').toLowerCase()
+            : (u.full_name || u.name || u.username || '').toLowerCase();
+          const username = (u.username || '').toLowerCase();
+          return name.includes(query) || username.includes(query);
+        });
+        const matchesLastMsg = (conv.last_message?.content || '').toLowerCase().includes(query);
+        return matchesName || matchesLastMsg;
       }
-      if (item.type === 'empty-state') {
-        return (
-          <EmptyState 
-            icon={isAnonymous ? "help-circle-outline" : "chatbubbles-outline"}
-            title={isAnonymous ? "No Ghost Matches" : "No conversations yet"}
-            subtitle={isAnonymous 
-              ? "Go to Ghost Explore to find and match with strangers anonymously." 
-              : "Start a chat from a profile or anonymous match."}
-          />
-        );
+
+      return true;
+    });
+    return sortConversationsPinnedFirst(list);
+  }, [rawConversations, isAnonymousMode, searchQuery]);
+
+  // Navigation to Chatroom
+  const handleOpenConversation = (conv: any) => {
+    const convId = (conv._id || conv.id)?.toString();
+    if (!convId) return;
+
+    clearConversationNotifications(convId);
+    router.push(`/chat/${convId}`);
+  };
+
+  // Start or Open Chat with a Searched User
+  const handleStartChatWithUser = async (user: any) => {
+    const targetUserId = (user._id || user.id)?.toString();
+    if (!targetUserId) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Check if conversation already exists in active store
+    const existing = (rawConversations || []).find((c: any) => {
+      return (c.participants || []).some((p: any) => {
+        const uid = (p.user?._id || p.user?.id || p.user || p._id || p.id)?.toString();
+        return uid === targetUserId;
+      });
+    });
+
+    const q = new URLSearchParams();
+    q.set('recipientId', targetUserId);
+    q.set('username', user.username || user.name || 'user');
+    if (user.avatar || user.avatar_url) q.set('profileImage', String(user.avatar || user.avatar_url));
+
+    if (existing) {
+      const convId = (existing._id || existing.id)?.toString();
+      useChatStore.getState().unskipConversation?.(convId);
+      router.push(`/chat/${convId}?${q.toString()}` as any);
+      return;
+    }
+
+    try {
+      const res = await apiClient.post('/users/conversations', {
+        recipientId: targetUserId,
+        isAnonymous: isAnonymousMode,
+      });
+      const convData = res.data?.data;
+      const convId = (convData?.conversation?.id || convData?.conversation?._id || convData?._id || convData?.id)?.toString();
+
+      if (convId) {
+        useChatStore.getState().unskipConversation?.(convId);
+        if (convData?.conversation) {
+          const storeConvs = useChatStore.getState().conversations || [];
+          useChatStore.getState().setConversations([
+            convData.conversation,
+            ...storeConvs.filter((c: any) => (c._id || c.id)?.toString() !== convId)
+          ], isAnonymousMode);
+        }
+        router.push(`/chat/${convId}?${q.toString()}` as any);
+      } else {
+        router.push(`/chat/new?${q.toString()}` as any);
       }
-      if (item.type === 'header') {
-        const isSuggestionsHeader = item.id === 'hdr-suggestions';
-        return (
-          <View style={styles.suggestionHeaderRow}>
-            <Text style={styles.sectionHeaderTitle}>{item.title}</Text>
-            {isSuggestionsHeader && (
-              <TouchableOpacity onPress={() => router.push('/explore')} activeOpacity={0.7}>
-                <Text style={styles.seeAllText}>See all</Text>
-              </TouchableOpacity>
+    } catch (e) {
+      router.push(`/chat/new?${q.toString()}` as any);
+    }
+  };
+
+  // REAL Follow / Unfollow Backend API Action
+  const handleToggleFollow = async (targetUserId: string) => {
+    const isCurrentlyFollowed = followedIds.has(targetUserId);
+    
+    // Optimistic UI Update
+    setFollowedIds(prev => {
+      const next = new Set(prev);
+      if (isCurrentlyFollowed) next.delete(targetUserId);
+      else next.add(targetUserId);
+      return next;
+    });
+
+    try {
+      if (isCurrentlyFollowed) {
+        await apiClient.post(`/users/${targetUserId}/unfollow`);
+      } else {
+        await apiClient.post(`/users/${targetUserId}/follow`);
+      }
+    } catch (e) {
+      // Revert on API error
+      setFollowedIds(prev => {
+        const next = new Set(prev);
+        if (isCurrentlyFollowed) next.add(targetUserId);
+        else next.delete(targetUserId);
+        return next;
+      });
+    }
+  };
+
+  // Dismiss Suggestion Item
+  const handleDismissSuggestion = (targetUserId: string) => {
+    setSuggestedUsers(prev => prev.filter(u => (u._id || u.id)?.toString() !== targetUserId?.toString()));
+  };
+
+  // Skip Ghost Room Action
+  const handleSkipGhostChat = async (conv: any) => {
+    const convId = (conv._id || conv.id)?.toString();
+    if (!convId) return;
+
+    Alert.alert('Skip Ghost Room', 'Are you sure you want to end and skip this anonymous chat?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Skip',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await apiClient.delete(`/chat/conversations/${convId}`);
+            useChatStore.getState().refreshConversations(isAnonymousMode);
+          } catch (e) {
+            useChatStore.getState().refreshConversations(isAnonymousMode);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Render Real Recent Chat Item
+  const renderConversationItem = ({ item: conv }: { item: any }) => {
+    if (!conv) return null;
+
+    const convId = (conv._id || conv.id)?.toString();
+    const participants = conv.participants || [];
+    
+    const partnerObj = participants.find((p: any) => {
+      const u = p.user || p || {};
+      const uid = (u._id || u.id)?.toString();
+      return uid && uid !== myId;
+    })?.user || {};
+
+    const isConvAnon = conv.is_anonymous === true || isAnonymousMode;
+
+    // Safety: In normal direct chats, if the partner user is missing or deleted, do not render orphaned card
+    if (!isConvAnon && conv.type !== 'group') {
+      const pId = (partnerObj._id || partnerObj.id)?.toString();
+      if (!pId || partnerObj.is_deleted_user) return null;
+    }
+    const ghostPersona = partnerObj.ghost_persona || partnerObj.anonymousPersona || {};
+
+    const partnerName = isConvAnon
+      ? (ghostPersona.name || partnerObj.full_name || 'Shadow Ghost')
+      : (partnerObj.full_name || partnerObj.name || partnerObj.username || 'AnuFi User');
+
+    const partnerAvatar = isConvAnon
+      ? (ghostPersona.avatar || partnerObj.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=Ghost')
+      : resolveAvatarUrl(partnerObj.avatar_url || partnerObj.avatar);
+
+    const partnerInitials = partnerName
+      .split(' ')
+      .map((n: string) => n[0])
+      .join('')
+      .substring(0, 2)
+      .toUpperCase();
+
+    const isPinned = !!conv.is_pinned;
+    const isMuted = !!conv.is_muted;
+
+    const lastMsg = conv.last_message;
+    const lastMsgContent = typeof lastMsg?.content === 'string' ? lastMsg.content : '';
+    const lastMsgType = lastMsg?.message_type || lastMsg?.type || 'text';
+
+    const senderId = (
+      lastMsg?.sender_id?._id ||
+      lastMsg?.sender_id?.id ||
+      lastMsg?.sender_id ||
+      lastMsg?.senderId ||
+      lastMsg?.sender?._id ||
+      lastMsg?.sender?.id ||
+      lastMsg?.sender
+    )?.toString();
+
+    const isMine = !!(senderId && myId && senderId === myId);
+
+    const isRead = lastMsg?.status === 'read' ||
+      (lastMsg?.read_by && Array.isArray(lastMsg.read_by) && lastMsg.read_by.length > 0);
+
+    const isUnread = !isMine && !!lastMsg && (
+      (conv.unread_count && Number(conv.unread_count) > 0) ||
+      (conv.unread_counts && Number(conv.unread_counts[myId]) > 0) ||
+      lastMsg.status !== 'read'
+    );
+
+    const msgFormatted = formatMessageContent(lastMsg);
+    let previewText = msgFormatted;
+
+    if (!lastMsg) {
+      previewText = 'Active now';
+    } else {
+      const timeRef = isMine
+        ? (isRead
+            ? (lastMsg.readAt || lastMsg.read_at || lastMsg.updated_at || lastMsg.created_at || conv.updated_at)
+            : (lastMsg.created_at || conv.updated_at))
+        : (lastMsg.created_at || conv.updated_at);
+      const timeStr = formatRelativeTime(timeRef);
+
+      if (isMine) {
+        const statusLabel = isRead ? `Seen ${timeStr}` : `Sent ${timeStr}`;
+        previewText = timeStr ? `${msgFormatted} · ${statusLabel}` : msgFormatted;
+      } else {
+        previewText = timeStr && msgFormatted !== 'Active now' ? `${msgFormatted} · ${timeStr}` : msgFormatted;
+      }
+    }
+
+    return (
+      <Pressable
+        key={convId}
+        style={({ pressed }) => [
+          styles.chatRow,
+          isPinned && styles.pinnedChatRow,
+          isConvAnon && styles.ghostChatRow,
+          pressed && styles.cardPressed,
+        ]}
+        onPress={() => handleOpenConversation(conv)}
+        onLongPress={() => openActionSheet(conv)}
+        delayLongPress={220}
+      >
+        {/* Real Avatar or Initial Circle */}
+        <View style={styles.avatarWrap}>
+          {partnerAvatar && !partnerAvatar.includes('placeholder') ? (
+            <Image
+              source={{ uri: partnerAvatar }}
+              style={styles.avatarImg}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.avatarInitialCircle, { backgroundColor: getInitialBg(partnerName) }]}>
+              <Text style={styles.initialText}>{partnerInitials}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Real User Info & Preview */}
+        <View style={styles.chatInfo}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text
+              style={[
+                styles.partnerName,
+                { color: isConvAnon ? '#FFFFFF' : theme.text },
+                isUnread && { fontWeight: '800' }
+              ]}
+              numberOfLines={1}
+            >
+              {partnerName}
+            </Text>
+            {isMuted && (
+              <Ionicons
+                name="volume-mute"
+                size={14}
+                color={isConvAnon ? '#94A3B8' : (theme.subtitle || '#94A3B8')}
+                style={{ marginLeft: 5, marginBottom: 2 }}
+              />
             )}
           </View>
-        );
-      }
-      if (item.type === 'suggestion') {
-        const sugUser = item.data;
-        return (
-          <MessageSuggestionRow 
-            sugUser={sugUser} 
-            COLORS={COLORS} 
-            router={router} 
-            onDismiss={() => dismissSuggestion(sugUser._id || sugUser.id)} 
-          />
-        );
-      }
-      return null;
-    }
-    return renderSearchListItem({ item });
-  }, [searchQuery, myId, renderSearchListItem, COLORS, dismissSuggestion, isAnonymous, styles.sectionHeader, styles.sectionHeaderTitle, router]);
+          <Text
+            style={[
+              styles.previewSubtext,
+              {
+                color: isUnread
+                  ? (isConvAnon ? '#FFFFFF' : theme.text)
+                  : (isConvAnon ? '#94A3B8' : (theme.subtitle || '#64748B')),
+                fontWeight: isUnread ? '800' : '500',
+              }
+            ]}
+            numberOfLines={1}
+          >
+            {previewText}
+          </Text>
+        </View>
 
-  const listData = useMemo(() => {
-    if (!searchQuery.trim()) {
-      const data: any[] = [];
-      if (filteredConversations.length > 0) {
-        data.push(...filteredConversations.map(c => ({ id: `chat-${c._id || c.id}`, type: 'chat', data: c })));
-      } else {
-        data.push({ id: 'empty-state-row', type: 'empty-state' });
-      }
+        {/* Pin indicator badge */}
+        {isPinned && (
+          <View style={styles.pinIndicatorBadge}>
+            <Ionicons name="pin" size={13} color="#6366F1" />
+          </View>
+        )}
 
-      // Append suggested users if less than 10 conversations
-      if (!isAnonymous && conversations.length < 10 && suggestedUsers.length > 0) {
-        data.push({ id: 'hdr-suggestions', type: 'header', title: 'Accounts to follow' });
-        data.push(...suggestedUsers.map(u => ({
-          id: `suggested-${u._id || u.id}`,
-          type: 'suggestion',
-          data: u,
-        })));
-      }
-      return data;
-    }
-    const data: any[] = [];
-    if (filteredConversations.length > 0) {
-      data.push({ id: 'hdr-recent', type: 'header', title: 'Recent Chats' });
-      data.push(...filteredConversations.map(c => ({ id: `chat-${c._id || c.id}`, type: 'chat', data: c })));
-    }
-    if (searchResults.length > 0 || searchLoading) {
-      data.push({ id: 'hdr-search', type: 'header', title: 'Start New Chat' });
-      if (searchLoading) {
-        data.push({ id: 'loading-indicator', type: 'loading' });
-      } else {
-        data.push(...searchResults.map(u => ({
-          id: `user-${u.id || u._id}`,
-          type: 'user',
-          data: u,
-          existing: userIdToConversation.get((u.id || u._id)?.toString()),
-        })));
-      }
-    }
-    return data;
-  }, [filteredConversations, searchResults, searchLoading, searchQuery, userIdToConversation]);
+        {/* Unread indicator dot */}
+        {isUnread && (
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#9333EA', marginRight: 6 }} />
+        )}
 
+        {/* Actions: Call button in Normal Mode, Skip + Report in Anonymous Mode */}
+        {!isAnonymousMode && !isConvAnon ? (
+          <TouchableOpacity
+            style={styles.callIconBtn}
+            onPress={() => handleOpenConversation(conv)}
+          >
+            <Ionicons name="call-outline" size={20} color={theme.primary || '#5B21B6'} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <TouchableOpacity
+              style={styles.anonActionBtnSkip}
+              onPress={() => handleSkipGhostChat(conv)}
+            >
+              <Ionicons name="play-skip-forward-outline" size={15} color="#FF9800" />
+              <Text style={styles.anonActionBtnTextSkip}>Skip</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.anonActionBtnReport}
+              onPress={() => router.push(`/report?targetId=${convId}&targetType=conversation` as any)}
+            >
+              <Ionicons name="flag-outline" size={14} color="#FF3B30" />
+              <Text style={styles.anonActionBtnTextReport}>Report</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </Pressable>
+    );
+  };
+
+  // Dynamic Stylesheet based on Light / Dark Mode & Anonymous Mode
+  const styles = useMemo(() => getStyles(theme, isAnonymousMode), [theme, isAnonymousMode]);
 
   return (
-    <View style={[styles.safe, { paddingTop: insets.top }]}>
-      {/* Sleek Instagram-style Clean Header with Text Tabs */}
-      <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          <TouchableOpacity 
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setActiveTab('chats');
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.topTabText, activeTab === 'chats' && styles.topTabTextActive]}>
-              Chats
+    <SafeAreaView style={[styles.container, { backgroundColor: isAnonymousMode ? '#0F172A' : theme.background }]}>
+      <StatusBar barStyle={theme.background === '#121212' || isAnonymousMode ? 'light-content' : 'dark-content'} />
+      {/* 1. Header Navigation Bar */}
+      <View style={styles.topHeader}>
+        {/* Left Segmented Pill Switcher [Chats | Calls] */}
+        {isAnonymousMode ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 }}>
+              Ghost Inbox
             </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setActiveTab('calls');
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.topTabText, activeTab === 'calls' && styles.topTabTextActive]}>
-              Calls
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {!isAnonymous && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity onPress={() => setShowCreateGroupModal(true)} hitSlop={10}>
-              <Ionicons name="add" size={30} color={COLORS.text} />
-            </TouchableOpacity>
           </View>
-        )}
-      </View>
- 
-      {activeTab === 'chats' && (
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={COLORS.subtitle} style={{ opacity: 0.7 }} />
-            <TextInput
-              placeholder="Search"
-              placeholderTextColor={COLORS.subtitle}
-              style={styles.searchInput}
-              value={localSearchQuery}
-              onChangeText={setLocalSearchQuery}
-              autoCorrect={false}
-              returnKeyType="search"
-            />
-            {localSearchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setLocalSearchQuery('')} hitSlop={8}>
-                <Ionicons name="close-circle" size={18} color={COLORS.subtitle} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
-
-      <View style={styles.listContainer}>
-        {isLoading ? (
-          <ChatListSkeleton />
-        ) : activeTab === 'chats' ? (
-          <FastFlashList
-            data={listData as any}
-            keyExtractor={(item: any, index: number) => {
-              return item.id || (item?._id || item?.id || index).toString();
-            }}
-            renderItem={renderListItem}
-            estimatedItemSize={75}
-            getItemType={(item: any) => item.is_group ? 'group' : 'direct'}
-            drawDistance={300}
-            keyboardShouldPersistTaps="handled"
-            ListHeaderComponent={
-              <View>
-                {!isAnonymous && <StoryBar />}
-                <View style={styles.messagesHeaderRow}>
-                  <Text style={styles.messagesHeaderTitle}>
-                    {isAnonymous ? 'Ghost Messages' : 'Messages'}
-                  </Text>
-                  {!isAnonymous && (
-                    <TouchableOpacity
-                      onPress={() => router.push('/message-requests')}
-                      style={styles.requestsButton}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.requestsText}>Requests</Text>
-                      {requestCount > 0 && (
-                        <View style={styles.requestsBadge}>
-                          <Text style={styles.requestsBadgeText}>{requestCount}</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            }
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
-            style={{ flex: 1 }}
-          />
         ) : (
-          <FlatList
-            data={callLogs}
-            keyExtractor={(item) => item.id}
-            renderItem={renderCallLogItem}
-            keyboardShouldPersistTaps="handled"
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
-            ListEmptyComponent={
-              <EmptyState
-                icon="call-outline"
-                title="No call history"
-                subtitle="Recent audio and video calls will show up here."
-              />
-            }
-            contentContainerStyle={callLogs.length === 0 ? styles.emptyList : styles.listContent}
-          />
+          <View style={styles.segmentedPillContainer}>
+            <TouchableOpacity
+              style={[styles.segmentTab, headerTab === 'chats' && styles.segmentTabActive]}
+              onPress={() => setHeaderTab('chats')}
+            >
+              <Text style={[styles.segmentTabText, headerTab === 'chats' && styles.segmentTabTextActive]}>
+                Chats
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.segmentTab, headerTab === 'calls' && styles.segmentTabActive]}
+              onPress={() => setHeaderTab('calls')}
+            >
+              <Text style={[styles.segmentTabText, headerTab === 'calls' && styles.segmentTabTextActive]}>
+                Calls
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Right Action Icons (Envelope / Plus) — Only in Normal Mode */}
+        {!isAnonymousMode && (
+          <View style={styles.headerRightActions}>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => router.push('/message-requests')}
+            >
+              <Ionicons name="mail-outline" size={24} color={theme.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => {
+                searchInputRef.current?.focus();
+              }}
+            >
+              <Ionicons name="create-outline" size={24} color={theme.text} />
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
-      {/* Group Creation Modal */}
-      <Modal
-        visible={showCreateGroupModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowCreateGroupModal(false)}
+      {/* 2. Search Messages Input Bar */}
+      <View style={styles.searchBarContainer}>
+        <View style={styles.searchInnerBar}>
+          <Ionicons name="search-outline" size={18} color={theme.subtitle || '#64748B'} style={{ marginRight: 8 }} />
+          <TextInput
+            ref={searchInputRef}
+            style={styles.searchInput}
+            placeholder="Search people or messages..."
+            placeholderTextColor={theme.subtitle || '#94A3B8'}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color={theme.subtitle || '#94A3B8'} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      {/* 3. Main Inbox Scroll Content */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#5B21B6']}
+            tintColor="#5B21B6"
+          />
+        }
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
-          {/* Header */}
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCreateGroupModal(false)} style={styles.modalCloseBtn}>
-              <Ionicons name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Create Group Chat</Text>
-            <TouchableOpacity
-              onPress={handleCreateGroup}
-              disabled={creatingGroup || !groupName.trim() || selectedParticipants.size < 2}
-              style={[
-                styles.modalCreateBtn,
-                (creatingGroup || !groupName.trim() || selectedParticipants.size < 2) && { opacity: 0.5 }
-              ]}
-            >
-              {creatingGroup ? (
-                <ActivityIndicator size="small" color={COLORS.primary} />
-              ) : (
-                <Text style={styles.modalCreateTxt}>Create</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Group Info Input */}
-          <View style={styles.groupInfoContainer}>
-            <TextInput
-              style={styles.groupNameInput}
-              placeholder="Enter Group Name..."
-              placeholderTextColor={COLORS.subtitle}
-              value={groupName}
-              onChangeText={setGroupName}
-            />
-          </View>
-
-          {/* Search Participants */}
-          <View style={styles.modalSearchContainer}>
-            <View style={styles.modalSearchBar}>
-              <Ionicons name="search" size={18} color={COLORS.subtitle} />
-              <TextInput
-                placeholder="Search friends..."
-                placeholderTextColor={COLORS.subtitle}
-                style={styles.modalSearchInput}
-                value={groupSearchQuery}
-                onChangeText={setGroupSearchQuery}
-              />
-            </View>
-          </View>
-
-          {/* Following Users List */}
-          <View style={{ flex: 1 }}>
-            {loadingFollowing ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
+        {/* ── SEARCH MODE ACTIVE ── */}
+        {searchQuery.trim().length > 0 ? (
+          <View style={{ paddingHorizontal: 16 }}>
+            {/* 1. Matching Conversations from Inbox */}
+            {filteredConversations.length > 0 && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={styles.searchSectionTitle}>CHATS</Text>
+                {filteredConversations.map((conv: any) => (
+                  renderConversationItem({ item: conv })
+                ))}
               </View>
-            ) : (
-              <FlatList
-                data={filteredGroupUsers}
-                keyboardShouldPersistTaps="handled"
-                keyExtractor={(item) => (item._id || item.id).toString()}
-                renderItem={({ item }) => {
-                  const isSelected = selectedParticipants.has(item._id || item.id);
+            )}
+
+            {/* 2. Global People / Users Search Results from Backend */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={styles.searchSectionTitle}>PEOPLE</Text>
+              {isSearchingUsers ? (
+                <ActivityIndicator size="small" color="#5B21B6" style={{ marginVertical: 14 }} />
+              ) : searchedUsers.length > 0 ? (
+                searchedUsers.map((user: any) => {
+                  const uId = (user._id || user.id)?.toString();
+                  const uName = user.name || user.full_name || user.username || 'User';
+                  const uUsername = user.username || 'user';
+                  const uAvatar = resolveAvatarUrl(user.avatar || user.avatar_url);
+                  const uInitials = uName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+
                   return (
                     <TouchableOpacity
-                      onPress={() => toggleParticipant(item._id || item.id)}
+                      key={uId}
+                      style={styles.searchedUserRow}
+                      onPress={() => handleStartChatWithUser(user)}
                       activeOpacity={0.7}
-                      style={styles.participantItem}
                     >
-                      <Image
-                        source={{ uri: resolveAvatarUrl(item.profileImage || item.avatar_url || item.avatar, item.username) }}
-                        style={styles.participantAvatar}
-                        contentFit="cover"
-                      />
+                      {/* Avatar */}
+                      {uAvatar && !uAvatar.includes('placeholder') ? (
+                        <Image source={{ uri: uAvatar }} style={styles.searchedUserAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.searchedUserInitialCircle, { backgroundColor: getInitialBg(uName) }]}>
+                          <Text style={styles.initialText}>{uInitials}</Text>
+                        </View>
+                      )}
+
+                      {/* Name & @username */}
                       <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={styles.participantUsername}>{item.fullName || item.full_name || item.username}</Text>
-                        <Text style={styles.participantFullName}>@{item.username}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Text style={[styles.searchedUserName, { color: isAnonymousMode ? '#FFFFFF' : theme.text }]} numberOfLines={1}>
+                            {uName}
+                          </Text>
+                          {user.verified && (
+                            <Ionicons name="checkmark-circle" size={14} color="#3B82F6" />
+                          )}
+                        </View>
+                        <Text style={[styles.searchedUserUsername, { color: isAnonymousMode ? '#94A3B8' : (theme.subtitle || '#64748B') }]} numberOfLines={1}>
+                          @{uUsername}
+                        </Text>
                       </View>
-                      <View style={[
-                        styles.checkbox,
-                        isSelected && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
-                      ]}>
-                        {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
+
+                      {/* Chat action button */}
+                      <View style={styles.searchChatBtn}>
+                        <Ionicons name="chatbubble-outline" size={16} color="#5B21B6" />
+                        <Text style={styles.searchChatBtnText}>Chat</Text>
                       </View>
                     </TouchableOpacity>
                   );
-                }}
-                ListEmptyComponent={
-                  <View style={{ padding: 40, alignItems: 'center' }}>
-                    <Text style={{ color: COLORS.subtitle }}>No friends found.</Text>
+                })
+              ) : (
+                filteredConversations.length === 0 && (
+                  <View style={styles.emptyInboxWrap}>
+                    <Text style={[styles.emptyTitle, isAnonymousMode && { color: '#FFFFFF' }]}>
+                      No users found
+                    </Text>
+                    <Text style={styles.emptySub}>
+                      No users matching "{searchQuery}"
+                    </Text>
                   </View>
-                }
-              />
-            )}
+                )
+              )}
+            </View>
           </View>
-        </SafeAreaView>
+        ) : (
+          /* ── NORMAL INBOX MODE ── */
+          <>
+            {/* Horizontal Stories Bar (Only in Normal Mode) */}
+            {!isAnonymousMode && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.storyScrollContainer}
+              >
+                {/* Your Story */}
+                <TouchableOpacity style={styles.storyItem} onPress={() => router.push('/create-story')}>
+                  <View style={styles.yourStoryAvatarWrap}>
+                    <Image
+                      source={{ uri: resolveAvatarUrl(currentUser?.avatar_url || currentUser?.avatar) }}
+                      style={styles.storyAvatar}
+                    />
+                    <View style={styles.addStoryPlusBadge}>
+                      <Ionicons name="add" size={12} color="#FFFFFF" />
+                    </View>
+                  </View>
+                  <Text style={styles.storyLabel}>Your Story</Text>
+                </TouchableOpacity>
+
+                {/* Active Real Stories from Backend API ONLY */}
+                {realStories.map((storyGroup: any, idx: number) => {
+                  const storyUser = storyGroup.user || storyGroup.author || {};
+                  const name = storyUser.full_name || storyUser.username || 'Story';
+                  const avatar = resolveAvatarUrl(storyUser.avatar_url || storyUser.avatar || storyGroup.avatar);
+
+                  return (
+                    <TouchableOpacity
+                      key={storyGroup._id || idx}
+                      style={styles.storyItem}
+                      onPress={() => router.push(`/story-view?userId=${storyUser._id || storyGroup.userId}` as any)}
+                    >
+                      <View style={styles.friendStoryAvatarRing}>
+                        <Image source={{ uri: avatar }} style={styles.storyAvatar} />
+                      </View>
+                      <Text style={styles.storyLabel} numberOfLines={1}>
+                        {name.split(' ')[0]}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* Recent Conversations List */}
+            <View style={styles.conversationsListWrap}>
+              {filteredConversations.length > 0 ? (
+                filteredConversations.map((conv: any) => (
+                  renderConversationItem({ item: conv })
+                ))
+              ) : (
+                <View style={styles.emptyInboxWrap}>
+                  <Text style={[styles.emptyTitle, isAnonymousMode && { color: '#FFFFFF' }]}>No messages yet</Text>
+                  <Text style={styles.emptySub}>
+                    {isAnonymousMode ? 'No ghost conversations yet.' : 'Start a chat with your friends below!'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* 4. REAL SUGGESTED FOR YOU Section (Only in Normal Mode) */}
+            {!isAnonymousMode && suggestedUsers.length > 0 && (
+              <View style={styles.suggestedSectionWrap}>
+                <Text style={styles.suggestedHeaderTitle}>SUGGESTED FOR YOU</Text>
+
+                {loadingSuggestions ? (
+                  <ActivityIndicator size="small" color="#5B21B6" style={{ marginVertical: 12 }} />
+                ) : (
+                  suggestedUsers.map((user: any) => {
+                    const userIdStr = (user._id || user.id)?.toString();
+                    if (!userIdStr || userIdStr === myId) return null;
+
+                    const isFollowed = followedIds.has(userIdStr);
+                    const fullName = user.full_name || user.name || user.username || 'User';
+                    const avatar = resolveAvatarUrl(user.avatar_url || user.avatar);
+                    const initials = fullName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+
+                    return (
+                      <View key={userIdStr} style={styles.suggestedRow}>
+                        {/* Avatar or Initials */}
+                        {avatar && !avatar.includes('placeholder') ? (
+                          <Image source={{ uri: avatar }} style={styles.suggestedAvatar} />
+                        ) : (
+                          <View style={[styles.suggestedInitialCircle, { backgroundColor: getInitialBg(fullName) }]}>
+                            <Text style={styles.initialText}>{initials}</Text>
+                          </View>
+                        )}
+
+                        {/* Name & @username */}
+                        <View style={styles.suggestedInfo}>
+                          <Text style={styles.suggestedName} numberOfLines={1}>{fullName}</Text>
+                          <Text style={styles.suggestedUsername} numberOfLines={1}>@{user.username || 'user'}</Text>
+                        </View>
+
+                        {/* Follow Pill Button */}
+                        <TouchableOpacity
+                          style={[styles.followBtn, isFollowed && styles.followingBtn]}
+                          onPress={() => handleToggleFollow(userIdStr)}
+                        >
+                          <Text style={[styles.followBtnText, isFollowed && { color: '#0F172A' }]}>
+                            {isFollowed ? 'Following' : 'Follow'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Dismiss Button */}
+                        <TouchableOpacity
+                          style={styles.dismissBtn}
+                          onPress={() => handleDismissSuggestion(userIdStr)}
+                        >
+                          <Ionicons name="close" size={18} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
+          </>
+        )}
+      </ScrollView>
+
+      {/* Long-Press Action Modal Bottom Sheet */}
+      <Modal
+        visible={actionSheetVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeActionSheet}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeActionSheet} />
+        <Animated.View
+          style={[
+            styles.modalSheet,
+            {
+              backgroundColor: isAnonymousMode ? '#1E293B' : (theme.background || '#FFFFFF'),
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          {/* Top Handle */}
+          <View style={styles.modalHandle} />
+
+          {/* Chat Header Details */}
+          {selectedConv && (() => {
+            const participants = selectedConv.participants || [];
+            const partner = participants.find((p: any) => {
+              const u = p.user || p || {};
+              const uid = (u._id || u.id)?.toString();
+              return uid && uid !== myId;
+            })?.user || {};
+
+            const isAnon = selectedConv.is_anonymous === true || isAnonymousMode;
+            const ghost = partner.ghost_persona || partner.anonymousPersona || {};
+            const pName = isAnon
+              ? (ghost.name || partner.full_name || 'Shadow Ghost')
+              : (partner.full_name || partner.name || partner.username || 'AnuFy User');
+            const pAvatar = isAnon
+              ? (ghost.avatar || partner.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=Ghost')
+              : resolveAvatarUrl(partner.avatar_url || partner.avatar);
+
+            const preview = formatMessageContent(selectedConv.last_message);
+
+            const isPinned = !!selectedConv.is_pinned;
+            const isMuted = !!selectedConv.is_muted;
+
+            return (
+              <>
+                <View style={styles.modalHeaderRow}>
+                  <Image
+                    source={{ uri: pAvatar }}
+                    style={styles.modalAvatar}
+                    contentFit="cover"
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalTitle, { color: isAnon ? '#FFFFFF' : theme.text }]} numberOfLines={1}>
+                      {pName}
+                    </Text>
+                    <Text style={[styles.modalSubtitle, { color: isAnon ? '#94A3B8' : (theme.subtitle || '#64748B') }]} numberOfLines={1}>
+                      {preview}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalDivider} />
+
+                {/* Option 1: Pin / Unpin */}
+                <TouchableOpacity
+                  style={styles.modalActionItem}
+                  onPress={handlePinAction}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.modalActionIconBox, { backgroundColor: 'rgba(99, 102, 241, 0.12)' }]}>
+                    <Ionicons name={isPinned ? 'pin' : 'pin-outline'} size={20} color="#6366F1" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalActionText, { color: isAnon ? '#FFFFFF' : theme.text }]}>
+                      {isPinned ? 'Unpin from top' : 'Pin to top'}
+                    </Text>
+                    <Text style={styles.modalActionSubtext}>
+                      {isPinned ? 'Remove from top of chat list' : 'Keep at the top of your chats (up to 5)'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+
+                {/* Option 2: Mute / Unmute */}
+                <TouchableOpacity
+                  style={styles.modalActionItem}
+                  onPress={handleMuteAction}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.modalActionIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                    <Ionicons name={isMuted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color="#10B981" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalActionText, { color: isAnon ? '#FFFFFF' : theme.text }]}>
+                      {isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                    </Text>
+                    <Text style={styles.modalActionSubtext}>
+                      {isMuted ? 'Resume notifications for this chat' : 'Silence notifications for this chat'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+
+                {/* Option 3: Delete Chat */}
+                <TouchableOpacity
+                  style={styles.modalActionItem}
+                  onPress={handleDeleteAction}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.modalActionIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
+                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalActionText, { color: '#EF4444' }]}>
+                      Delete chat
+                    </Text>
+                    <Text style={styles.modalActionSubtext}>
+                      Delete chat and messages from your side only
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              </>
+            );
+          })()}
+
+          <View style={{ height: Platform.OS === 'ios' ? 36 : 18 }} />
+        </Animated.View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
-const MessageSuggestionRow = React.memo(({ sugUser, COLORS, router, onDismiss }: any) => {
-  const targetId = sugUser._id || sugUser.id;
-  const { toggleFollow, isLoading } = useFollowStatus(targetId, {
-    isFollowing: !!sugUser.is_following,
-    isPending: !!sugUser.is_requested
-  });
-
-  return (
-    <View style={{
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      backgroundColor: COLORS.background
-    }}>
-      <TouchableOpacity
-        onPress={() => router.push(`/user/${sugUser.username}`)}
-        style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
-        activeOpacity={0.7}
-        delayPressIn={100}
-      >
-        <Image
-          source={{ uri: resolveAvatarUrl(sugUser.avatar_url || sugUser.avatar || sugUser.profileImage, sugUser.username || sugUser.name || sugUser.full_name, false) }}
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 24,
-            backgroundColor: COLORS.surface
-          }}
-          contentFit="cover"
-        />
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.text }} numberOfLines={1}>
-            {sugUser.username}
-          </Text>
-          <Text style={{ fontSize: 13, color: COLORS.subtitle, marginTop: 1 }} numberOfLines={1}>
-            {sugUser.name || sugUser.full_name || sugUser.username}
-          </Text>
-        </View>
-      </TouchableOpacity>
-
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <FollowButton
-          targetUserId={targetId}
-          onToggle={toggleFollow}
-          isLoading={isLoading}
-          variant="primary"
-          size="md"
-        />
-        <TouchableOpacity onPress={onDismiss} hitSlop={10}>
-          <Ionicons name="close" size={20} color={COLORS.subtitle} />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-});
-
-const getStyles = (COLORS: any) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.background, minHeight: 0 },
-  header: {
+// ------------------------------------------------------------
+// STYLESHEET
+// ------------------------------------------------------------
+const getStyles = (theme: any, isAnonymousMode: boolean) => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: isAnonymousMode ? '#0F172A' : theme.background,
+  },
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 8,
-    backgroundColor: COLORS.background,
+    paddingBottom: 10,
   },
-  topTabText: {
-    fontSize: 20,
+  segmentedPillContainer: {
+    flexDirection: 'row',
+    backgroundColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#F3F0FF'),
+    borderRadius: 14,
+    padding: 3,
+  },
+  segmentTab: {
+    paddingVertical: 6,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  segmentTabActive: {
+    backgroundColor: isAnonymousMode ? '#334155' : theme.background,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentTabText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: COLORS.subtitle,
-    letterSpacing: -0.3,
+    color: isAnonymousMode ? '#94A3B8' : (theme.subtitle || '#64748B'),
   },
-  topTabTextActive: {
-    fontSize: 22,
+  segmentTabTextActive: {
+    color: isAnonymousMode ? '#FFFFFF' : theme.text,
     fontWeight: '800',
-    color: COLORS.text,
-    letterSpacing: -0.4,
   },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-    backgroundColor: COLORS.background,
-  },
-  searchBar: {
+  headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 21,
+    gap: 14,
+  },
+  headerActionBtn: {
+    padding: 4,
+  },
+  searchBarContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  searchInnerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#F5F3FF'),
+    borderRadius: 16,
     paddingHorizontal: 14,
-    height: 42,
+    height: 44,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
-    fontSize: 15,
-    color: COLORS.text,
-    paddingVertical: 0,
+    fontSize: 14.5,
+    color: isAnonymousMode ? '#FFFFFF' : theme.text,
     height: '100%',
   },
-  listContainer: { flexGrow: 1, minHeight: 0, paddingBottom: 100 },
-  messagesHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  scrollContent: {
+    paddingBottom: 32,
+  },
+  storyScrollContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    backgroundColor: COLORS.background,
+    paddingBottom: 16,
+    gap: 16,
   },
-  suggestionHeaderRow: {
-    flexDirection: 'row',
+  storyItem: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    backgroundColor: COLORS.background,
+    width: 68,
   },
-  seeAllText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.primary,
+  yourStoryAvatarWrap: {
+    position: 'relative',
+    marginBottom: 6,
   },
-  messagesHeaderTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.text,
-    letterSpacing: -0.3,
-  },
-  requestsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  requestsText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  requestsBadge: {
-    backgroundColor: '#EF4444',
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestsBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  listContent: { paddingBottom: 20 },
-  emptyList: { flexGrow: 1, justifyContent: 'center' },
-  empty: { flex: 1, padding: 32, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 16 },
-  emptySub: { marginTop: 8, fontSize: 14, color: COLORS.subtitle, textAlign: 'center', lineHeight: 20 },
-  
-  // Group creation modal styles
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  modalCloseBtn: { padding: 4 },
-  modalTitle: { fontSize: 17, fontWeight: '800', color: COLORS.text },
-  modalCreateBtn: { paddingHorizontal: 12, paddingVertical: 6 },
-  modalCreateTxt: { fontSize: 16, fontWeight: '700', color: COLORS.primary },
-  groupInfoContainer: { padding: 16 },
-  groupNameInput: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: COLORS.text,
-    backgroundColor: COLORS.surface,
-  },
-  modalSearchContainer: { paddingHorizontal: 16, paddingBottom: 12 },
-  modalSearchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 40,
-  },
-  modalSearchInput: { flex: 1, marginLeft: 6, fontSize: 14, color: COLORS.text, padding: 0 },
-  modalLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  participantItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border + '50',
-  },
-  participantAvatar: { width: 44, height: 44, borderRadius: 22 },
-  participantUsername: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  participantFullName: { fontSize: 13, color: COLORS.subtitle, marginTop: 2 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+  friendStoryAvatarRing: {
+    padding: 2,
+    borderRadius: 36,
     borderWidth: 2,
-    borderColor: COLORS.border,
+    borderColor: '#8B5CF6',
+    marginBottom: 6,
+  },
+  storyAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#E2E8F0'),
+  },
+  addStoryPlusBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: theme.primary || '#5B21B6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: isAnonymousMode ? '#0F172A' : theme.background,
+  },
+  storyLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: isAnonymousMode ? '#94A3B8' : theme.text,
+    textAlign: 'center',
+  },
+  conversationsListWrap: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  chatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+  },
+  pinnedChatRow: {
+    backgroundColor: isAnonymousMode ? 'rgba(99, 102, 241, 0.08)' : (theme.surface || 'rgba(99, 102, 241, 0.05)'),
+    borderLeftWidth: 3,
+    borderLeftColor: '#6366F1',
+    paddingLeft: 8,
+    marginBottom: 2,
+  },
+  pinIndicatorBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  ghostChatRow: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  cardPressed: {
+    opacity: 0.8,
+  },
+  avatarWrap: {
+    marginRight: 14,
+  },
+  avatarImg: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#E2E8F0'),
+  },
+  avatarInitialCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sectionHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: COLORS.surface + '60',
-    marginTop: 10,
-  },
-  sectionHeaderTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: COLORS.subtitle,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  userSearchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: COLORS.background,
-  },
-  searchUserAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F3F4F6',
-  },
-  searchUserUsername: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  searchUserName: {
-    fontSize: 13,
-    color: COLORS.subtitle,
-    marginTop: 2,
-  },
-  chatBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  chatBtnText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  // Segmented Tabs Styles
-  tabContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: 3,
-    borderRadius: 12,
-    width: 170,
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 6,
-    alignItems: 'center',
-    borderRadius: 9,
-  },
-  tabButtonActive: {
-    backgroundColor: COLORS.background,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
-    elevation: 1,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.subtitle,
-  },
-  tabTextActive: {
-    color: COLORS.text,
-  },
-  // Call History List Row Styles
-  callRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border + '35',
-  },
-  callUserAvatar: {
+  suggestedAvatar: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#E2E8F0'),
   },
-  callInfoContainer: {
+  suggestedInitialCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  initialText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  chatInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  partnerName: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  previewSubtext: {
+    fontSize: 13.5,
+    fontWeight: '500',
+  },
+  callIconBtn: {
+    padding: 8,
+  },
+  anonActionBtnSkip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 152, 0, 0.12)',
+    gap: 3,
+  },
+  anonActionBtnTextSkip: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FF9800',
+  },
+  anonActionBtnReport: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 59, 48, 0.12)',
+    gap: 3,
+  },
+  anonActionBtnTextReport: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FF3B30',
+  },
+  emptyInboxWrap: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: isAnonymousMode ? '#FFFFFF' : theme.text,
+  },
+  emptySub: {
+    fontSize: 13,
+    color: isAnonymousMode ? '#94A3B8' : (theme.subtitle || '#94A3B8'),
+    marginTop: 4,
+  },
+  suggestedSectionWrap: {
+    marginTop: 12,
+    borderTopWidth: 8,
+    borderTopColor: isAnonymousMode ? '#1E293B' : (theme.surface || '#F8FAFC'),
+    paddingTop: 16,
+    paddingHorizontal: 16,
+  },
+  suggestedHeaderTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.subtitle || '#94A3B8',
+    letterSpacing: 0.8,
+    marginBottom: 14,
+  },
+  suggestedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: isAnonymousMode ? '#1E293B' : (theme.border || '#F1F5F9'),
+  },
+  suggestedInfo: {
     flex: 1,
     marginLeft: 14,
   },
-  callUsername: {
+  suggestedName: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.text,
+    color: isAnonymousMode ? '#FFFFFF' : theme.text,
   },
-  callDetailsRow: {
+  suggestedUsername: {
+    fontSize: 13,
+    color: theme.subtitle || '#64748B',
+    marginTop: 1,
+  },
+  followBtn: {
+    backgroundColor: theme.primary || '#4C0099',
+    paddingVertical: 7,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    marginRight: 10,
+  },
+  followingBtn: {
+    backgroundColor: isAnonymousMode ? '#334155' : (theme.surface || '#E2E8F0'),
+  },
+  followBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  dismissBtn: {
+    padding: 6,
+  },
+
+  // ── Long Press Action Bottom Sheet ──
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  modalSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 24,
+  },
+  modalHandle: {
+    width: 44,
+    height: 4.5,
+    borderRadius: 3,
+    backgroundColor: isAnonymousMode ? '#475569' : '#D1D5DB',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    gap: 14,
+    paddingBottom: 14,
   },
-  callSubtitle: {
+  modalAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: isAnonymousMode ? '#334155' : '#F1F5F9',
+  },
+  modalTitle: {
+    fontSize: 16.5,
+    fontWeight: '800',
+  },
+  modalSubtitle: {
     fontSize: 13,
-    color: COLORS.subtitle,
+    marginTop: 2,
   },
-  callActions: {
-    marginLeft: 12,
+  modalDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: isAnonymousMode ? '#334155' : '#E5E7EB',
+    marginBottom: 8,
   },
-  callActionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    justifyContent: 'center',
+  modalActionItem: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 13,
+    gap: 14,
+  },
+  modalActionIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalActionText: {
+    fontSize: 15.5,
+    fontWeight: '700',
+  },
+  modalActionSubtext: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+
+  // ── Global Search Mode Styles ──
+  searchSectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.subtitle || '#94A3B8',
+    letterSpacing: 0.8,
+    marginVertical: 10,
+  },
+  searchedUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: isAnonymousMode ? '#1E293B' : (theme.border || '#F1F5F9'),
+  },
+  searchedUserAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: isAnonymousMode ? '#334155' : '#F1F5F9',
+  },
+  searchedUserInitialCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchedUserName: {
+    fontSize: 15.5,
+    fontWeight: '700',
+  },
+  searchedUserUsername: {
+    fontSize: 13,
+    marginTop: 1,
+  },
+  searchChatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: isAnonymousMode ? '#334155' : 'rgba(91, 33, 182, 0.1)',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+  },
+  searchChatBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: isAnonymousMode ? '#FFFFFF' : (theme.primary || '#5B21B6'),
   },
 });

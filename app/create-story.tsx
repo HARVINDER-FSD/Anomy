@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, SafeAreaView, 
   Dimensions, StatusBar, Platform, Image, ActivityIndicator, 
@@ -10,9 +10,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as Haptics from 'expo-haptics';
 import Svg, { Path, G as SvgGroup } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
-import * as ExpoAV from 'expo-av';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { scale, verticalScale } from '@/src/utils/responsive';
@@ -22,11 +23,19 @@ interface CreateStoryVideoItemProps {
   style: any;
 }
 
-const CreateStoryVideoItem = ({ uri, style }: CreateStoryVideoItemProps) => {
+const CreateStoryVideoItemInner = ({ uri, style }: CreateStoryVideoItemProps) => {
   const player = useVideoPlayer(uri, p => {
     p.loop = true;
-    p.play();
   });
+
+  useEffect(() => {
+    if (player && uri) {
+      try {
+        player.play();
+      } catch (_) {}
+    }
+  }, [player, uri]);
+
   return (
     <VideoView
       player={player}
@@ -36,9 +45,13 @@ const CreateStoryVideoItem = ({ uri, style }: CreateStoryVideoItemProps) => {
     />
   );
 };
+
+const CreateStoryVideoItem = ({ uri, style }: CreateStoryVideoItemProps) => {
+  if (!uri) return null;
+  return <CreateStoryVideoItemInner key={uri} uri={uri} style={style} />;
+};
 import { apiClient } from '@/src/api/client';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
-import * as ImageManipulator from 'expo-image-manipulator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -347,9 +360,22 @@ export default function AnuFyNeonEditorPro() {
   const [trendingSongs, setTrendingSongs] = useState<any[]>([]);
   const [recentSongs, setRecentSongs] = useState<any[]>([]);
   const [isLoadingMusic, setIsLoadingMusic] = useState(false);
-  const player = useRef<ExpoAV.Audio.Sound | null>(null);
+  const storyAudioRef = useRef<ExpoAV.Audio.Sound | null>(null);
   const musicReqId = useRef(0);
   const [themeIdx, setThemeIdx] = useState(0);
+
+  // Cleanly unload audio on unmount
+  useEffect(() => {
+    return () => {
+      if (storyAudioRef.current) {
+        const s = storyAudioRef.current;
+        storyAudioRef.current = null;
+        try {
+          s.unloadAsync().catch(() => {});
+        } catch (_) {}
+      }
+    };
+  }, []);
 
   const fetchTabSongs = async (tab: 'trending' | 'recent') => {
     setIsLoadingMusic(true);
@@ -417,42 +443,60 @@ export default function AnuFyNeonEditorPro() {
   };
 
   const selectSong = async (song: any) => {
-    // 🚀 Robust Audio Handling: Track request to prevent overlapping
-    musicReqId.current += 1;
-    const currentId = musicReqId.current;
+    // 1. Immediately place music sticker on canvas with 0ms delay
+    const trackName = song.trackName || song.title || 'Featured Track';
+    const artistName = song.artistName || song.artist || 'Artist';
+    const artworkUrl = (song.artworkUrl100 || song.artworkUrl60 || song.coverArt || '').replace('100x100bb', '300x300bb');
+    const previewUrl = song.previewUrl || '';
 
-    if (player.current) {
-      try {
-        await player.current.unloadAsync();
-      } catch (e) {}
-      player.current = null;
-    }
-
-    try {
-      const { sound } = await ExpoAV.Audio.Sound.createAsync(
-        { uri: song.previewUrl }, 
-        { shouldPlay: true, isLooping: true }
-      );
-      
-      // Only assign and play if this is still the LATEST request
-      if (currentId === musicReqId.current) {
-        player.current = sound;
-        setElements(prev => [
-          ...prev.filter(e => e.type !== 'music'), 
-          { 
-            id: Date.now(), type: 'music', artist: song.artistName, 
-            songTitle: song.trackName, coverArt: song.artworkUrl100, 
-            previewUrl: song.previewUrl, x: 0, y: -200, scale: 1, rotate: 0 
-          }
-        ]);
-      } else {
-        // A newer song was selected while this one was loading; kill this one
-        await sound.unloadAsync();
+    setElements(prev => [
+      ...prev.filter(e => e.type !== 'music'), 
+      { 
+        id: Date.now(), 
+        type: 'music', 
+        artist: artistName, 
+        songTitle: trackName, 
+        coverArt: artworkUrl, 
+        previewUrl: previewUrl, 
+        x: 0, 
+        y: 0, 
+        scale: 1, 
+        rotate: 0 
       }
-    } catch(err) {
-    } 
+    ]);
+
     setActiveTool(null); 
     setSearchMusic('');
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // 2. Play audio preview in background
+    if (previewUrl) {
+      musicReqId.current += 1;
+      const currentId = musicReqId.current;
+
+      if (storyAudioRef.current) {
+        const oldSound = storyAudioRef.current;
+        storyAudioRef.current = null;
+        try {
+          await oldSound.unloadAsync();
+        } catch (e) {}
+      }
+
+      try {
+        const { sound } = await ExpoAV.Audio.Sound.createAsync(
+          { uri: previewUrl }, 
+          { shouldPlay: true, isLooping: true }
+        );
+        
+        if (currentId === musicReqId.current) {
+          storyAudioRef.current = sound;
+        } else {
+          try {
+            await sound.unloadAsync();
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
   };
 
   const fetchFoundUsers = useCallback(async (q: string) => {
@@ -610,12 +654,12 @@ export default function AnuFyNeonEditorPro() {
                         musicReqId.current += 1; 
                         const currentId = musicReqId.current;
                         try {
-                            if (player.current) { await player.current.unloadAsync(); }
+                            if (storyAudioRef.current) { await storyAudioRef.current.unloadAsync(); }
                             const { sound } = await ExpoAV.Audio.Sound.createAsync(
                                 { uri: originalMusic.previewUrl },
                                 { shouldPlay: true, isLooping: true }
                             );
-                            if (currentId === musicReqId.current) { player.current = sound; } else { await sound.unloadAsync(); }
+                            if (currentId === musicReqId.current) { storyAudioRef.current = sound; } else { await sound.unloadAsync(); }
                         } catch (err) {  }
                     };
                     playMusic();
@@ -666,7 +710,7 @@ export default function AnuFyNeonEditorPro() {
           { 
              id: 'bg_' + Date.now(),
              type: 'text', content: ' ', 
-             color: '#000', bgStyle: 'solid', // Now uses #000 directly
+             color: '#000', bgStyle: 'solid',
              x: 0, y: 0, scale: 10, rotate: 0, isBase: true, isLocked: true
           },
           // 2. The Post as a scalable Reshare Card
@@ -680,6 +724,24 @@ export default function AnuFyNeonEditorPro() {
              isLocked: false,
              width: CANVAS_WIDTH * 0.8,
              height: CANVAS_HEIGHT * 0.7
+          }
+       ]);
+       setMode('edit');
+       setActiveTool(null);
+    } else if (mediaUrl) {
+       // Direct media from Gallery/Create screen
+       setElements([
+          { 
+             id: 'base_' + Date.now(), 
+             type: 'image', 
+             uri: mediaUrl, 
+             x: 0, y: 0, scale: 1, rotate: 0,
+             isBase: true,
+             // @ts-ignore
+             isVideo: mediaType === 'video',
+             isLocked: true,
+             width: CANVAS_WIDTH,
+             height: CANVAS_HEIGHT
           }
        ]);
        setMode('edit');
@@ -701,7 +763,7 @@ export default function AnuFyNeonEditorPro() {
     };
   }, [mode, elements.length]);
 
-  useEffect(() => { return () => { if (player.current) player.current.unloadAsync(); }; }, []);
+  useEffect(() => { return () => { if (storyAudioRef.current) storyAudioRef.current.unloadAsync(); }; }, []);
 
   const handleCapture = async () => {
     if (cameraRef.current) {
@@ -728,7 +790,7 @@ export default function AnuFyNeonEditorPro() {
   const pickImage = async () => {
     // First pass: let user pick any image or video (no forced crop)
     const r = await ImagePicker.launchImageLibraryAsync({ 
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ['images', 'videos'],
       quality: 0.9, 
       allowsEditing: false,
       videoMaxDuration: 60,
@@ -907,9 +969,11 @@ export default function AnuFyNeonEditorPro() {
     setShowDiscardModal(false); 
     setThemeIdx(0); 
     musicReqId.current += 1; // 🚀 Invalidate all in-flight audio requests
-    if (player.current) {
-      player.current.unloadAsync(); 
-      player.current = null;
+    if (storyAudioRef.current) {
+      try {
+        storyAudioRef.current.unloadAsync().catch(() => {});
+      } catch (_) {}
+      storyAudioRef.current = null;
     }
   };
 
@@ -979,7 +1043,10 @@ export default function AnuFyNeonEditorPro() {
                   onDoubleTap={(e)=>{setTxtVal(e.content||''); setTxtColor(e.color||'#FFF'); setTxtBg(e.bgStyle||'none'); setEditingId(e.id); setActiveTool('text');}}
                   onDelete={(id) => {
                      const el = elements.find(e => e.id === id);
-                     if (el?.type === 'music' && player.current) { player.current.unloadAsync(); player.current = null; }
+                     if (el?.type === 'music' && storyAudioRef.current) { 
+                       try { storyAudioRef.current.unloadAsync().catch(() => {}); } catch (_) {}
+                       storyAudioRef.current = null; 
+                     }
                      setElements(p => p.filter(e => e.id !== id));
                   }}
                 />

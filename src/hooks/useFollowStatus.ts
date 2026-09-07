@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRelationshipStore, RelationshipState } from '../store/relationshipStore';
 import api from '../api/client';
 import { socketService } from '../lib/socket';
@@ -34,6 +34,9 @@ export const useFollowStatus = (
   
   const [isLoading, setIsLoading] = useState(false);
   const [isActionRunning, setIsActionRunning] = useState(false);
+  // Track whether we've already done an HTTP fetch so we don't re-fetch on every store update
+  const hasFetchedRef = useRef(false);
+  const prevTargetIdRef = useRef<string>('');
 
   // Destructure initialData into primitive variables with snake_case fallbacks
   const initialFollowing = initialData?.isFollowing ?? (initialData as any)?.is_following ?? (initialData as any)?.isFollowingUser;
@@ -103,17 +106,24 @@ export const useFollowStatus = (
     }
   }, [targetUserId, updateRelationship]);
 
-  // Sync on mount if option enabled OR if status has never been fetched from HTTP
+  // Sync on mount ONCE per targetUserId — never re-run just because updatedAt changed
   useEffect(() => {
-    if (
-      targetUserId &&
-      targetUserId !== 'undefined' &&
-      targetUserId !== 'null' &&
-      (options?.syncOnMount || relationship.updatedAt === 0 || relationship.source === 'initial')
-    ) {
+    if (!targetUserId || targetUserId === 'undefined' || targetUserId === 'null') return;
+
+    // Reset fetch gate when target changes
+    if (prevTargetIdRef.current !== targetUserId) {
+      prevTargetIdRef.current = targetUserId;
+      hasFetchedRef.current = false;
+    }
+
+    // Only hit the network if: forced, or first time for this user
+    const needsFetch = options?.syncOnMount || !hasFetchedRef.current;
+    if (needsFetch && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
       fetchStatus();
     }
-  }, [targetUserId, fetchStatus, options?.syncOnMount, relationship.updatedAt, relationship.source]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetUserId, options?.syncOnMount]);
 
   // 3. Socket event listener for real-time sync
   useEffect(() => {

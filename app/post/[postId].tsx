@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, FlatList, Platform, Alert, RefreshControl, StatusBar, Share, DeviceEventEmitter, Modal, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Platform, Alert, RefreshControl, StatusBar, Share, DeviceEventEmitter, Modal, ScrollView, Pressable, Image as RNImage } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { MessageCircleDashed } from 'lucide-react-native';
+import { MessageCircleDashed, Forward } from 'lucide-react-native';
 import { useAppTheme } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { useAuthStore, User } from '@/src/store/authStore';
@@ -12,9 +13,52 @@ import { FollowButton } from '@/src/components/common/FollowButton';
 import * as Haptics from 'expo-haptics';
 import { VerifiedTick } from '@/src/components/common/VerifiedTick';
 import { socketService } from '@/src/lib/socket';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, createVideoPlayer } from 'expo-video';
 import { CommentBottomSheet } from '@/components/CommentBottomSheet';
 import { useFollowStatus } from '@/src/hooks/useFollowStatus';
+import { DeleteEngine } from '@/src/engines/DeleteEngine';
+
+function SmartPostImage({ uri, style }: { uri: string; style?: any }) {
+  const [aspectRatio, setAspectRatio] = useState<number>(1); // default 1:1
+
+  useEffect(() => {
+    if (!uri) return;
+    RNImage.getSize(
+      uri,
+      (w, h) => {
+        if (!w || !h) return;
+        const rawRatio = w / h;
+        const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.91);
+        setAspectRatio(clampedRatio);
+      },
+      () => {}
+    );
+  }, [uri]);
+
+  return (
+    <Image
+      source={{ uri }}
+      onLoad={(evt) => {
+        const { width, height } = evt?.source || {};
+        if (width && height) {
+          const rawRatio = width / height;
+          const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.91);
+          setAspectRatio(clampedRatio);
+        }
+      }}
+      style={[
+        style,
+        {
+          width: '100%',
+          aspectRatio: aspectRatio,
+        },
+      ]}
+      contentFit="cover"
+      cachePolicy="disk"
+      transition={200}
+    />
+  );
+}
 
 interface PostDetailVideoItemProps {
   uri: string;
@@ -127,6 +171,24 @@ const getTimeAgo = (dateStr: string) => {
   return `${Math.floor(diffHrs / 24)}d ago`;
 };
 
+const PostFollowButton = ({ targetUserId, initialIsFollowing, style, textStyle }: any) => {
+  const { isFollowing, isLoading, toggleFollow } = useFollowStatus(targetUserId || '', {
+    isFollowing: initialIsFollowing,
+  });
+
+  return (
+    <FollowButton
+      targetUserId={targetUserId}
+      onToggle={toggleFollow}
+      isLoading={isLoading}
+      variant="transparent"
+      size="sm"
+      style={style}
+      textStyle={textStyle}
+    />
+  );
+};
+
 export default function PostDetailsScreen() {
   const COLORS = useAppTheme();
   const styles = getStyles(COLORS);
@@ -192,6 +254,94 @@ export default function PostDetailsScreen() {
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 50,
   }).current;
+
+  const [musicInfoPost, setMusicInfoPost] = useState<{
+    songName: string;
+    artist: string;
+    coverImage?: string;
+    postId: string;
+  } | null>(null);
+
+  // ── 🎵 Single Post Detail Audio Controller (Powered by expo-video, 1 instance) ──
+  const detailPlayerRef = useRef<any>(null);
+  const detailAudioReqId = useRef(0);
+
+  const activePostItem = posts[0] || null;
+  const activePostMusic = activePostItem?.music || (activePostItem as any)?.music_info;
+  const activeMusicUrl =
+    activePostMusic?.preview_url ||
+    activePostMusic?.previewUrl ||
+    activePostMusic?.audio_url ||
+    activePostMusic?.url ||
+    (activePostItem as any)?.preview_url ||
+    (activePostItem as any)?.previewUrl;
+  const activeSongName =
+    activePostMusic?.song_name ||
+    activePostMusic?.songTitle ||
+    (activePostItem as any)?.song_name;
+  const activeArtist =
+    activePostMusic?.artist ||
+    activePostMusic?.artist_name ||
+    (activePostItem as any)?.artist;
+
+  useEffect(() => {
+    detailAudioReqId.current += 1;
+    const reqId = detailAudioReqId.current;
+
+    const cleanupPlayer = () => {
+      if (detailPlayerRef.current) {
+        try {
+          detailPlayerRef.current.pause();
+        } catch (_) {}
+        detailPlayerRef.current = null;
+      }
+    };
+
+    if (isFeedMuted || (!activeMusicUrl && !activeSongName)) {
+      cleanupPlayer();
+      return;
+    }
+
+    const resolveAndPlay = async () => {
+      let finalUrl = activeMusicUrl;
+      if (!finalUrl && activeSongName) {
+        try {
+          const query = `${activeSongName} ${activeArtist || ''}`.trim();
+          const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=1`);
+          const data = await res.json();
+          if (data?.results?.[0]?.previewUrl) {
+            finalUrl = data.results[0].previewUrl;
+          }
+        } catch (_) {}
+      }
+
+      if (reqId !== detailAudioReqId.current || !finalUrl) {
+        return;
+      }
+
+      cleanupPlayer();
+
+      try {
+        const resolved = resolveMediaUrl(finalUrl);
+        const player = createVideoPlayer(resolved);
+        try {
+          (player as any).keepScreenOnWhilePlaying = false;
+        } catch (_) {}
+        player.loop = true;
+        player.muted = false;
+        player.volume = 1.0;
+        detailPlayerRef.current = player;
+        player.play();
+      } catch (err) {}
+    };
+
+    void resolveAndPlay();
+
+    return () => {
+      detailAudioReqId.current += 1;
+      cleanupPlayer();
+    };
+  }, [isFeedMuted, activeMusicUrl, activeSongName, activeArtist]);
 
   useEffect(() => {
     if (posts.length > 0) {
@@ -659,9 +809,31 @@ export default function PostDetailsScreen() {
       }));
     });
 
+    const socket = socketService.socket;
+    const onSocketPostUpdated = (data: { postId: string; likesCount?: number; commentsCount?: number; reaction?: string; userId?: string }) => {
+      if (!data?.postId) return;
+      setPosts(prev => prev.map(p => {
+        if (String(p._id || p.id) === String(data.postId)) {
+          return {
+            ...p,
+            likes_count: data.likesCount !== undefined ? data.likesCount : p.likes_count,
+            comments_count: data.commentsCount !== undefined ? data.commentsCount : p.comments_count,
+          };
+        }
+        return p;
+      }));
+    };
+
+    if (socket) {
+      socket.on('post:updated', onSocketPostUpdated);
+    }
+
     return () => {
       likeSub.remove();
       bookmarkSub.remove();
+      if (socket) {
+        socket.off('post:updated', onSocketPostUpdated);
+      }
     };
   }, []);
 
@@ -696,10 +868,11 @@ export default function PostDetailsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            DeleteEngine.purgePostFromAllCaches(String(pid));
             setPosts(prev => prev.filter(p => (p._id || p.id) !== pid));
-            DeviceEventEmitter.emit('post:deleted:local', { postId: pid });
             try {
               await apiClient.delete(`/posts/${pid}`);
+              router.back();
             } catch (err) {
               Alert.alert('Error', 'Failed to delete post. Please try again.');
               loadInitialPost();
@@ -734,16 +907,66 @@ export default function PostDetailsScreen() {
       author?.username
     );
 
-    const { isFollowing, isPending, isLoading, toggleFollow } = useFollowStatus(authorId || '', {
-      isFollowing: !!((item as any).is_following || (item as any).isFollowing),
-    });
-    const isFollowingActive = isFollowing || isPending;
-
     const mediaUrl = item.media_urls?.[0] || item.media?.[0]?.url;
     const resolvedMedia = resolveMediaUrl(mediaUrl);
     const isVideo = item.media_type === 'video';
     const thumbnailUrl = item.thumbnail_url || item.video_thumbnail || item.thumbnail || mediaUrl;
     const resolvedThumb = resolveMediaUrl(thumbnailUrl);
+
+    let parsedMusic: any = item.music || {};
+    let parsedMusicInfo: any = (item as any).music_info || {};
+    if (typeof parsedMusic === 'string') {
+      try { parsedMusic = JSON.parse(parsedMusic); } catch (_) { }
+    }
+    if (typeof parsedMusicInfo === 'string') {
+      try { parsedMusicInfo = JSON.parse(parsedMusicInfo); } catch (_) { }
+    }
+
+    const songName =
+      parsedMusic?.song_name ||
+      parsedMusicInfo?.song_name ||
+      parsedMusic?.songTitle ||
+      parsedMusicInfo?.songTitle ||
+      parsedMusic?.name ||
+      parsedMusicInfo?.name ||
+      (item as any).song_name ||
+      (item as any).songTitle ||
+      (item as any).music_title;
+
+    const songArtist =
+      parsedMusic?.artist ||
+      parsedMusicInfo?.artist ||
+      parsedMusic?.artist_name ||
+      parsedMusicInfo?.artist_name ||
+      parsedMusic?.singer ||
+      parsedMusicInfo?.singer ||
+      (item as any).artist ||
+      (item as any).singer;
+
+    const postAudioUrl =
+      parsedMusic?.preview_url ||
+      parsedMusicInfo?.preview_url ||
+      parsedMusic?.previewUrl ||
+      parsedMusicInfo?.previewUrl ||
+      parsedMusic?.audio_url ||
+      parsedMusicInfo?.audio_url ||
+      parsedMusic?.audioUrl ||
+      parsedMusicInfo?.audioUrl ||
+      parsedMusic?.url ||
+      parsedMusicInfo?.url ||
+      parsedMusic?.uri ||
+      parsedMusicInfo?.uri ||
+      (item as any).preview_url ||
+      (item as any).previewUrl ||
+      (item as any).music_url ||
+      (item as any).audio_url ||
+      (item as any).audioUrl;
+
+    const hasMusicMetadata = !!(
+      songName ||
+      songArtist ||
+      postAudioUrl
+    );
 
     return (
       <View>
@@ -752,7 +975,9 @@ export default function PostDetailsScreen() {
           <TouchableOpacity
             style={{ flexDirection: 'column', alignItems: 'flex-start', gap: verticalScale(2) }}
             disabled={postIsAnon && !isOwn}
-            onPress={() => router.push(`/user/${author?.username}`)}
+            onPress={() => {
+              if (author?.username) router.push(`/user/${author.username}`);
+            }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Image
@@ -771,12 +996,9 @@ export default function PostDetailsScreen() {
                 )}
 
                 {!isOwn && !postIsAnon && (
-                  <FollowButton
+                  <PostFollowButton
                     targetUserId={authorId || ''}
-                    onToggle={toggleFollow}
-                    isLoading={isLoading}
-                    variant="transparent"
-                    size="sm"
+                    initialIsFollowing={!!((item as any).is_following || (item as any).isFollowing)}
                     style={styles.followButtonHeader}
                     textStyle={styles.followButtonHeaderText}
                   />
@@ -786,15 +1008,6 @@ export default function PostDetailsScreen() {
             
             <View style={{ marginTop: verticalScale(2) }}>
               {item.location?.name && <Text style={[styles.postLocation, postIsAnon && { color: '#888' }]}>{item.location.name}</Text>}
-
-              {(item.music?.song_name || item.music_info?.song_name) && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(4), marginTop: verticalScale(2) }}>
-                  <Ionicons name="musical-notes" size={11} color={COLORS.primary} />
-                  <Text style={[styles.musicInfoText, postIsAnon && { color: '#888' }]} numberOfLines={1}>
-                    {item.music?.song_name || item.music_info?.song_name} {(item.music?.artist || item.music_info?.artist) ? `- ${item.music?.artist || item.music_info?.artist}` : ''}
-                  </Text>
-                </View>
-              )}
             </View>
           </TouchableOpacity>
 
@@ -818,184 +1031,233 @@ export default function PostDetailsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            if (isVideo) {
-              const videoPosts = posts.filter(p => p.media_type === 'video');
-              const currentIdx = videoPosts.findIndex(p => (p._id || p.id) === pid);
-              const formattedVideoList = videoPosts.map(p => {
-                const innerId = p._id || p.id;
-                const mUrl = p.media_urls?.[0] || p.media?.[0]?.url;
-                const tUrl = p.thumbnail_url || p.video_thumbnail || p.thumbnail;
-                const react = userReactions[innerId as string] || p.user_reaction || p.userReaction;
-                const liked = !!(react || p.isLiked);
-                return {
-                  ...p,
-                  id: String(innerId),
-                  _id: String(innerId),
-                  isLiked: liked,
-                  is_liked: liked,
-                  user_reaction: react,
-                  userReaction: react,
-                  videoUrl: resolveMediaUrl(mUrl),
-                  video_url: resolveMediaUrl(mUrl),
-                  thumbnail_url: resolveMediaUrl(tUrl),
-                  thumbnail: resolveMediaUrl(tUrl),
-                  author: p.author || p.user
-                };
-              });
+        {resolvedMedia && (
+          <View style={{ position: 'relative' }}>
+            {isVideo ? (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  const videoPosts = posts.filter(p => p.media_type === 'video');
+                  const currentIdx = videoPosts.findIndex(p => (p._id || p.id) === pid);
+                  const formattedVideoList = videoPosts.map(p => {
+                    const innerId = p._id || p.id;
+                    const mUrl = p.media_urls?.[0] || p.media?.[0]?.url;
+                    const tUrl = p.thumbnail_url || p.video_thumbnail || p.thumbnail;
+                    const react = userReactions[innerId as string] || p.user_reaction || p.userReaction;
+                    const liked = !!(react || p.isLiked);
+                    return {
+                      ...p,
+                      id: String(innerId),
+                      _id: String(innerId),
+                      isLiked: liked,
+                      is_liked: liked,
+                      user_reaction: react,
+                      userReaction: react,
+                      videoUrl: resolveMediaUrl(mUrl),
+                      video_url: resolveMediaUrl(mUrl),
+                      thumbnail_url: resolveMediaUrl(tUrl),
+                      thumbnail: resolveMediaUrl(tUrl),
+                      author: p.author || p.user
+                    };
+                  });
 
-              const targetList = [
-                ...formattedVideoList.slice(currentIdx),
-                ...formattedVideoList.slice(0, currentIdx)
-              ];
+                  const targetList = [
+                    ...formattedVideoList.slice(currentIdx),
+                    ...formattedVideoList.slice(0, currentIdx)
+                  ];
 
-              useReelsStore.getState().setActiveReelData(targetList[0]);
-              useReelsStore.getState().setPreloadedReels(targetList);
+                  useReelsStore.getState().setActiveReelData(targetList[0]);
+                  useReelsStore.getState().setPreloadedReels(targetList);
 
-              router.push(`/reels/${pid}`);
-            }
-          }}
-          onLongPress={() => handlePostOptions(pid, isOwn)}
-          style={{ position: 'relative' }}
-        >
-          {resolvedMedia && (
-            isVideo ? (
-              <View style={styles.postImage}>
-                <PostDetailVideoItem
-                  uri={resolvedMedia}
-                  shouldPlay={activeVideoId === String(pid)}
-                  isMuted={isFeedMuted}
-                  style={StyleSheet.absoluteFill}
-                  onReady={() => {
-                    setReadyVideos(prev => ({ ...prev, [pid]: true }));
-                  }}
-                  onLoadStart={() => {
-                    setReadyVideos(prev => ({ ...prev, [pid]: false }));
-                  }}
-                />
-                {(!readyVideos[pid] || activeVideoId !== String(pid)) && (
-                  <Image
-                    source={{ uri: resolvedThumb }}
+                  router.push(`/reels/${pid}`);
+                }}
+                onLongPress={() => handlePostOptions(pid, isOwn)}
+              >
+                <View style={styles.postImage}>
+                  <PostDetailVideoItem
+                    uri={resolvedMedia}
+                    shouldPlay={activeVideoId === String(pid)}
+                    isMuted={(postAudioUrl || hasMusicMetadata) ? true : isFeedMuted}
                     style={StyleSheet.absoluteFill}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    transition={150}
+                    onReady={() => {
+                      setReadyVideos(prev => ({ ...prev, [pid]: true }));
+                    }}
+                    onLoadStart={() => {
+                      setReadyVideos(prev => ({ ...prev, [pid]: false }));
+                    }}
                   />
-                )}
-              </View>
+                  {(!readyVideos[pid] || activeVideoId !== String(pid)) && (
+                    <Image
+                      source={{ uri: resolvedThumb }}
+                      style={StyleSheet.absoluteFill}
+                      contentFit="cover"
+                      cachePolicy="disk"
+                      transition={150}
+                    />
+                  )}
+                </View>
+              </TouchableOpacity>
             ) : (
-              <Image
-                source={{ uri: resolvedMedia }}
-                style={styles.postImage}
-                contentFit="cover"
-                cachePolicy="disk"
-                transition={200}
-              />
-            )
-          )}
+              <TouchableOpacity
+                activeOpacity={0.95}
+                onLongPress={() => handlePostOptions(pid, isOwn)}
+              >
+                <SmartPostImage uri={resolvedMedia} />
+              </TouchableOpacity>
+            )}
 
-          {isVideo && (
+            {/* Global Mute / Music Toggle Button (Like Instagram) */}
+            {(isVideo || !!postAudioUrl || hasMusicMetadata) && (
+              <TouchableOpacity
+                style={styles.globalMuteButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setIsFeedMuted(prev => !prev);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isFeedMuted ? "volume-mute" : (postAudioUrl || hasMusicMetadata ? "musical-notes" : "volume-high")}
+                  size={16}
+                  color="#FFF"
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Action Row Container */}
+        <View style={styles.actionRowContainer}>
+          <View style={styles.actionPillContainer}>
             <TouchableOpacity
-              style={styles.globalMuteButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setIsFeedMuted(!isFeedMuted);
+              style={styles.pillActionBtn}
+              onPress={() => handleLike(pid, !!item.isLiked)}
+              onLongPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setReactingToPost(reactingToPost === pid ? null : pid);
               }}
+              delayLongPress={300}
               activeOpacity={0.7}
             >
-              <Ionicons
-                name={isFeedMuted ? "volume-mute" : "volume-high"}
-                size={18}
-                color="#FFF"
-              />
+              {(() => {
+                const reaction = userReactions[pid] || item.user_reaction || item.userReaction;
+                const isLiked = !!(item.isLiked || (item as any).is_liked || reaction);
+                const isEmojiReaction = reaction && reaction !== '❤️' && reaction !== '👍';
+
+                if (isEmojiReaction) {
+                  return <Text style={{ fontSize: 20 }}>{reaction}</Text>;
+                }
+                return (
+                  <MaterialCommunityIcons
+                    name={isLiked ? "thumb-up" : "thumb-up-outline"}
+                    size={25}
+                    color={isLiked ? "#FF3040" : (postIsAnon ? '#FFF' : COLORS.text)}
+                  />
+                );
+              })()}
+              {(isOwn || !(item as any).hide_like_count) && (
+                <Text style={[styles.pillActionText, postIsAnon && { color: '#FFF' }]}>
+                  {Math.max(item.likes_count || 0, likersByPostId[pid]?.length || item.likers?.length || 0)}
+                </Text>
+              )}
             </TouchableOpacity>
-          )}
-        </TouchableOpacity>
 
-        <View style={styles.actionPillContainer}>
-          <TouchableOpacity
-            style={styles.pillActionBtn}
-            onPress={() => handleLike(pid, !!item.isLiked)}
-            activeOpacity={0.7}
-          >
-            {userReactions[pid] ? (
-              <Text style={{ fontSize: 18 }}>{userReactions[pid]}</Text>
-            ) : (
-              <Ionicons
-                name={item.isLiked ? 'heart' : 'heart-outline'}
-                size={24}
-                color={item.isLiked ? COLORS.error : (postIsAnon ? '#FFF' : COLORS.text)}
-              />
+            {/* Comment Button */}
+            {!(item as any).comments_disabled && (
+              <TouchableOpacity
+                style={styles.pillActionBtn}
+                onPress={() => {
+                  setActivePostId(pid);
+                  setActivePostOwnerId(authorId || null);
+                  setCommentModalVisible(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <MessageCircleDashed size={22} color={postIsAnon ? '#FFF' : COLORS.text} />
+                <Text style={[styles.pillActionText, postIsAnon && { color: '#FFF' }]}>
+                  {item.comments_count || 0}
+                </Text>
+              </TouchableOpacity>
             )}
-            <Text style={[styles.pillActionText, { color: postIsAnon ? '#FFF' : COLORS.text }]}>
-              {Math.max(item.likes_count || 0, likersByPostId[pid]?.length || item.likers?.length || 0)}
-            </Text>
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.pillActionBtn, { paddingLeft: 0 }]}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              setReactingToPost(reactingToPost === pid ? null : pid);
-            }}
-          >
-            <MaterialCommunityIcons
-              name={reactingToPost === pid ? 'emoticon' : 'emoticon-outline'}
-              size={24}
-              color={reactingToPost === pid ? COLORS.primary : (postIsAnon ? '#FFF' : COLORS.text)}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.pillActionBtn}
-            onPress={() => {
-              setActivePostId(pid);
-              setActivePostOwnerId(authorId || null);
-              setCommentModalVisible(true);
-            }}
-          >
-            <MessageCircleDashed size={22} color={postIsAnon ? '#FFF' : COLORS.text} />
-            <Text style={[styles.pillActionText, { color: postIsAnon ? '#FFF' : COLORS.text }]}>
-              {item.comments_count || 0}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.pillActionBtn}
-            onPress={() => handleShare(
-              pid,
-              item.content || item.caption,
-              mediaUrl,
-              item.media_type as any,
-              author?.username,
-              author?.avatar_url || author?.avatar
-            )}
-          >
-            <Ionicons name="arrow-redo-outline" size={22} color={postIsAnon ? '#FFF' : COLORS.text} />
-          </TouchableOpacity>
-
-          {postIsAnon && !isOwn && (
+            {/* Share Button */}
             <TouchableOpacity
               style={styles.pillActionBtn}
               onPress={() => {
-                router.push({
-                  pathname: '/chat/new',
-                  params: {
-                    recipientId: String(authorId),
-                    username: displayUsername,
-                    isAnonymousChat: 'true',
-                  },
-                } as any);
+                handleShare(
+                  pid,
+                  item.content || item.caption,
+                  mediaUrl,
+                  item.media_type as any,
+                  author?.username,
+                  author?.avatar_url || author?.avatar
+                );
               }}
+              activeOpacity={0.7}
             >
-              <MessageCircleDashed size={22} color="#FF69B4" />
-              <Text style={[styles.pillActionText, { color: '#FF69B4' }]}>DM</Text>
+              <Forward size={22} color={postIsAnon ? '#FFF' : COLORS.text} />
             </TouchableOpacity>
-          )}
+
+            {/* DM Author option for Anonymous Mode */}
+            {postIsAnon && !isOwn && (
+              <TouchableOpacity
+                style={styles.pillActionBtn}
+                onPress={() => {
+                  router.push({
+                    pathname: '/chat/new',
+                    params: {
+                      recipientId: String(authorId),
+                      username: displayUsername,
+                      isAnonymousChat: 'true',
+                    },
+                  } as any);
+                }}
+                activeOpacity={0.7}
+              >
+                <MessageCircleDashed size={19} color="#FF69B4" />
+                <Text style={[styles.pillActionText, { color: '#FF69B4' }]}>DM</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* 🎵 Music Album Cover / Square Thumbnail Box on Right Corner */}
+          {(() => {
+            if (!hasMusicMetadata) return null;
+
+            const coverImage = parsedMusic?.cover_image || parsedMusicInfo?.cover_image || parsedMusic?.cover_url || parsedMusicInfo?.cover_url || (item as any).music_cover;
+            const avatarUrl = author?.avatar_url || author?.avatar;
+            const finalUrl = coverImage || avatarUrl;
+
+            return (
+              <TouchableOpacity
+                style={styles.musicSquareBox}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (isFeedMuted) {
+                    setIsFeedMuted(false);
+                  }
+                  setMusicInfoPost({
+                    songName: songName || 'Original Audio',
+                    artist: songArtist || displayUsername || 'AnuFy Creator',
+                    coverImage: finalUrl,
+                    postId: String(pid),
+                  });
+                }}
+                activeOpacity={0.8}
+              >
+                <Image
+                  source={{ uri: resolveMediaUrl(finalUrl) }}
+                  style={styles.musicSquareImage}
+                  contentFit="cover"
+                />
+                <View style={[styles.musicSquareBadge, { backgroundColor: isFeedMuted ? 'rgba(0,0,0,0.7)' : '#9333EA' }]}>
+                  <Ionicons name={isFeedMuted ? "volume-mute" : "musical-notes"} size={9} color="#FFF" />
+                </View>
+              </TouchableOpacity>
+            );
+          })()}
         </View>
 
         {reactingToPost === pid && (
@@ -1287,6 +1549,123 @@ export default function PostDetailsScreen() {
           }
         }}
       />
+
+      {/* 🎵 Instagram-style Music Details Bottom Sheet Modal */}
+      <Modal
+        visible={!!musicInfoPost}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMusicInfoPost(null)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}
+          onPress={() => setMusicInfoPost(null)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: '#18181B',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              paddingHorizontal: 20,
+              paddingTop: 12,
+              paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+              borderTopWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Grab Handle */}
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', alignSelf: 'center', marginBottom: 18 }} />
+
+            {/* Song Cover & Details */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <Image
+                source={{ uri: resolveMediaUrl(musicInfoPost?.coverImage) }}
+                style={{ width: 68, height: 68, borderRadius: 12, backgroundColor: '#27272A' }}
+                contentFit="cover"
+              />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Ionicons name="musical-notes" size={16} color="#A855F7" />
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#FFFFFF' }} numberOfLines={1}>
+                    {musicInfoPost?.songName || 'Original Audio'}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 13, color: '#A1A1AA', fontWeight: '500' }} numberOfLines={1}>
+                  {musicInfoPost?.artist || 'Unknown Artist'}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isFeedMuted ? '#EF4444' : '#22C55E' }} />
+                  <Text style={{ fontSize: 11, color: isFeedMuted ? '#F87171' : '#4ADE80', fontWeight: '600' }}>
+                    {isFeedMuted ? 'Muted' : 'Playing Now'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Play / Mute Toggle Button in Modal */}
+              <TouchableOpacity
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: '#27272A',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.15)',
+                }}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setIsFeedMuted(prev => !prev);
+                }}
+              >
+                <Ionicons
+                  name={isFeedMuted ? "volume-mute" : "musical-notes"}
+                  size={20}
+                  color={isFeedMuted ? '#FFF' : '#A855F7'}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  height: 44,
+                  borderRadius: 12,
+                  backgroundColor: '#9333EA',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  const sName = musicInfoPost?.songName || '';
+                  const sArt = musicInfoPost?.artist || '';
+                  setMusicInfoPost(null);
+                  router.push(`/post-editor?songName=${encodeURIComponent(sName)}&artist=${encodeURIComponent(sArt)}`);
+                }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Use this Audio</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  height: 44,
+                  paddingHorizontal: 18,
+                  borderRadius: 12,
+                  backgroundColor: '#27272A',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => setMusicInfoPost(null)}
+              >
+                <Text style={{ color: '#A1A1AA', fontWeight: '600', fontSize: 14 }}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1298,16 +1677,19 @@ const getStyles = (COLORS: any) => StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: scale(16),
-    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(45),
-    paddingBottom: verticalScale(14),
+    paddingTop: verticalScale(6),
+    paddingBottom: verticalScale(10),
     backgroundColor: COLORS.background,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   headerTitle: { fontSize: moderateFont(18), fontWeight: 'bold', color: COLORS.text },
   postCard: {
     backgroundColor: COLORS.background,
     marginBottom: 0,
   },
-  postHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: moderateScale(16), paddingRight: moderateScale(6), paddingVertical: moderateScale(8) },
+  postHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: moderateScale(16), paddingRight: moderateScale(6), paddingVertical: moderateScale(4) },
   postUser: { flexDirection: 'row', alignItems: 'center', gap: scale(6) },
   postAvatar: { width: moderateScale(30), height: moderateScale(30), borderRadius: moderateScale(15), borderWidth: 1.5, borderColor: COLORS.border },
   postUsername: { fontSize: moderateFont(14), fontWeight: '700', color: COLORS.text, letterSpacing: -0.3 },
@@ -1327,48 +1709,83 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   },
   postLocation: { fontSize: moderateFont(12), color: COLORS.subtitle, marginTop: verticalScale(2) },
   musicInfoText: {
-    fontSize: moderateFont(11),
+    fontSize: moderateFont(10),
     color: COLORS.subtitle,
     fontWeight: '400',
-    maxWidth: scale(200),
+    fontStyle: 'italic',
+    maxWidth: scale(180),
   },
   postImage: {
-    width: SIZES.width,
-    height: SIZES.width * 1.25,
+    width: '100%',
+    maxHeight: 560,
     backgroundColor: COLORS.surface,
     alignSelf: 'center',
+    marginTop: 0,
     overflow: 'hidden',
   },
   globalMuteButton: {
     position: 'absolute',
-    bottom: 8,
-    right: 4,
+    bottom: verticalScale(8),
+    right: scale(4),
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    padding: 8,
+    padding: scale(8),
     borderRadius: 20,
     zIndex: 10,
+  },
+  actionRowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: verticalScale(1),
+    paddingRight: scale(4),
   },
   actionPillContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'transparent',
     alignSelf: 'flex-start',
-    marginTop: verticalScale(8),
-    marginLeft: scale(16),
-    gap: scale(16),
+    marginTop: verticalScale(6),
+    marginLeft: scale(4),
+    gap: scale(14),
   },
   pillActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: scale(6),
-    paddingVertical: verticalScale(4),
-  },
-  pillDivider: {
-    width: 0,
+    gap: scale(3),
+    paddingVertical: verticalScale(2),
   },
   pillActionText: {
     fontSize: moderateFont(14),
-    fontWeight: '700',
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  musicSquareBox: {
+    width: scale(32),
+    height: scale(32),
+    borderRadius: moderateScale(6),
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#1C1C1E',
+    overflow: 'hidden',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: scale(8),
+    marginTop: verticalScale(4),
+  },
+  musicSquareImage: {
+    width: '100%',
+    height: '100%',
+  },
+  musicSquareBadge: {
+    position: 'absolute',
+    bottom: 1,
+    right: 1,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   reactionBarContainer: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-﻿import { useEditorStore } from '../store/editorStore';
+import { useEditorStore } from '../store/editorStore';
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { apiClient } from '../api/client';
@@ -64,30 +64,9 @@ export const ExporterService = {
 
   uploadToCloudinary: async (uri: string, type: 'video' | 'image' = 'video'): Promise<string | null> => {
     try {
-      // 1. Get Signature
-      const configRes = await apiClient.post('/upload', { folder: 'reels' });
-      const { cloudName, apiKey, timestamp, signature, publicId } = configRes.data;
-
-      // 2. Upload to Cloudinary
-      const formData = new FormData();
-      formData.append('file', {
-        uri: uri,
-        type: type === 'video' ? 'video/mp4' : 'image/jpeg',
-        name: type === 'video' ? 'video.mp4' : 'image.jpg',
-      } as any);
-      formData.append('api_key', apiKey);
-      formData.append('timestamp', timestamp.toString());
-      formData.append('signature', signature);
-      formData.append('public_id', publicId);
-      formData.append('folder', 'reels');
-
-      const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/${type}/upload`;
-      const res = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      return data.secure_url || null;
+      const { MediaEngine } = await import('../engines/MediaEngine');
+      const category = type === 'video' ? 'shots' : 'posts';
+      return await MediaEngine.uploadMedia(uri, type, category);
     } catch (e) {
       return null;
     }

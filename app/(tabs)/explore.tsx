@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   Platform, ActivityIndicator, StatusBar, ScrollView,
@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CreateGhostRoomModal } from '@/components/profile/CreateGhostRoomModal';
 import { Skeleton } from '@/components/ui/SkeletonLoader';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { verticalScale, scale, moderateScale } from '@/src/utils/responsive';
 
 const { width } = Dimensions.get('window');
 
@@ -437,17 +438,21 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   // Normal Mode Styles
   normalContainer: { flex: 1, backgroundColor: COLORS.background },
   header: {
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 65 : 60,
-    backgroundColor: COLORS.background
+    paddingHorizontal: 20,
+    paddingTop: verticalScale(6),
+    paddingBottom: 10,
+    backgroundColor: COLORS.background,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
-  title: { fontSize: 32, fontWeight: '800', color: COLORS.text, marginBottom: 15, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.5 },
+  title: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginBottom: 15, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.5 },
   searchBar: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface,
     borderRadius: 20, paddingHorizontal: 15, height: 50, borderWidth: 1, borderColor: COLORS.border
   },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: COLORS.text, fontFamily: 'Outfit_400Regular' },
-  content: { paddingVertical: 30, alignItems: 'center', paddingHorizontal: 20 },
+  content: { paddingVertical: 20, alignItems: 'center', paddingHorizontal: 20, width: '100%', maxWidth: 640, alignSelf: 'center' },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: 8, fontFamily: 'Outfit_700Bold' },
   sectionSubtitle: { fontSize: 13, color: COLORS.subtitle, textAlign: 'center', fontFamily: 'Outfit_400Regular', lineHeight: 18, width: '80%' },
 
@@ -486,7 +491,7 @@ const getStyles = (COLORS: any) => StyleSheet.create({
 
   // Ghost Mode Styles
   ghostContainer: { flex: 1, backgroundColor: COLORS.background },
-  ghostHeader: { padding: 20, backgroundColor: COLORS.background },
+  ghostHeader: { paddingHorizontal: 20, paddingTop: verticalScale(6), paddingBottom: 10, backgroundColor: COLORS.background, width: '100%', maxWidth: 640, alignSelf: 'center' },
   ghostTitle: { color: COLORS.text, fontSize: 28, fontWeight: '900', letterSpacing: -0.5, marginBottom: 15, fontFamily: 'Outfit_800ExtraBold' },
   ghostSearchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, borderRadius: 15, paddingHorizontal: 15, paddingVertical: 12, borderWidth: 1, borderColor: COLORS.border },
   ghostInput: { flex: 1, marginLeft: 10, color: COLORS.text, fontSize: 16, fontFamily: 'Outfit_400Regular' },

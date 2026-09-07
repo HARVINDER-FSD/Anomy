@@ -3,191 +3,205 @@ export interface EmojiItem {
   category: 'Smileys' | 'Gestures' | 'Animals' | 'Food' | 'Travel' | 'Activities' | 'Objects' | 'Symbols';
 }
 
-// 100% Curated, Verified and Beautiful Popular Emojis to guarantee maximum support without blanks
-const CURATED_EMOJIS: EmojiItem[] = [
-  // === SMILEYS (Verified 100+ Faces) ===
-  { emoji: '😀', category: 'Smileys' }, { emoji: '😃', category: 'Smileys' }, { emoji: '😄', category: 'Smileys' },
-  { emoji: '😁', category: 'Smileys' }, { emoji: '😆', category: 'Smileys' }, { emoji: '😅', category: 'Smileys' },
-  { emoji: '😂', category: 'Smileys' }, { emoji: '🤣', category: 'Smileys' }, { emoji: '🥲', category: 'Smileys' },
-  { emoji: '🥹', category: 'Smileys' }, { emoji: '😊', category: 'Smileys' }, { emoji: '😇', category: 'Smileys' },
-  { emoji: '🙂', category: 'Smileys' }, { emoji: '🙃', category: 'Smileys' }, { emoji: '😉', category: 'Smileys' },
-  { emoji: '😌', category: 'Smileys' }, { emoji: '😍', category: 'Smileys' }, { emoji: '🥰', category: 'Smileys' },
-  { emoji: '😘', category: 'Smileys' }, { emoji: '😗', category: 'Smileys' }, { emoji: '😙', category: 'Smileys' },
-  { emoji: '😚', category: 'Smileys' }, { emoji: '😋', category: 'Smileys' }, { emoji: '😛', category: 'Smileys' },
-  { emoji: '😝', category: 'Smileys' }, { emoji: '😜', category: 'Smileys' }, { emoji: '🤪', category: 'Smileys' },
-  { emoji: '🤨', category: 'Smileys' }, { emoji: '🧐', category: 'Smileys' }, { emoji: '🤓', category: 'Smileys' },
-  { emoji: '😎', category: 'Smileys' }, { emoji: '🥸', category: 'Smileys' }, { emoji: '🤩', category: 'Smileys' },
-  { emoji: '🥳', category: 'Smileys' }, { emoji: '😏', category: 'Smileys' }, { emoji: '😒', category: 'Smileys' },
-  { emoji: '😞', category: 'Smileys' }, { emoji: '😔', category: 'Smileys' }, { emoji: '😟', category: 'Smileys' },
-  { emoji: '😕', category: 'Smileys' }, { emoji: '🙁', category: 'Smileys' }, { emoji: '☹️', category: 'Smileys' },
-  { emoji: '😣', category: 'Smileys' }, { emoji: '😖', category: 'Smileys' }, { emoji: '😫', category: 'Smileys' },
-  { emoji: '😩', category: 'Smileys' }, { emoji: '🥺', category: 'Smileys' }, { emoji: '😢', category: 'Smileys' },
-  { emoji: '😭', category: 'Smileys' }, { emoji: '😤', category: 'Smileys' }, { emoji: '😠', category: 'Smileys' },
-  { emoji: '😡', category: 'Smileys' }, { emoji: '🤬', category: 'Smileys' }, { emoji: '🤯', category: 'Smileys' },
-  { emoji: '😳', category: 'Smileys' }, { emoji: '🥵', category: 'Smileys' }, { emoji: '🥶', category: 'Smileys' },
-  { emoji: '😱', category: 'Smileys' }, { emoji: '😨', category: 'Smileys' }, { emoji: '😰', category: 'Smileys' },
-  { emoji: '😥', category: 'Smileys' }, { emoji: '😓', category: 'Smileys' }, { emoji: '🫣', category: 'Smileys' },
-  { emoji: '🤗', category: 'Smileys' }, { emoji: '🫡', category: 'Smileys' }, { emoji: '🤔', category: 'Smileys' },
-  { emoji: '🤫', category: 'Smileys' }, { emoji: '🤥', category: 'Smileys' }, { emoji: '😶', category: 'Smileys' },
-  { emoji: '😐', category: 'Smileys' }, { emoji: '😑', category: 'Smileys' }, { emoji: '😬', category: 'Smileys' },
-  { emoji: '🫠', category: 'Smileys' }, { emoji: '🫨', category: 'Smileys' }, { emoji: '🫥', category: 'Smileys' },
-  { emoji: '😯', category: 'Smileys' }, { emoji: '😦', category: 'Smileys' }, { emoji: '😧', category: 'Smileys' },
-  { emoji: '😮', category: 'Smileys' }, { emoji: '😲', category: 'Smileys' }, { emoji: '🥱', category: 'Smileys' },
-  { emoji: '😴', category: 'Smileys' }, { emoji: '🤤', category: 'Smileys' }, { emoji: '😪', category: 'Smileys' },
-  { emoji: '😵', category: 'Smileys' }, { emoji: '😵‍💫', category: 'Smileys' }, { emoji: '🤐', category: 'Smileys' },
-  { emoji: '🥴', category: 'Smileys' }, { emoji: '🤢', category: 'Smileys' }, { emoji: '🤮', category: 'Smileys' },
-  { emoji: '🤧', category: 'Smileys' }, { emoji: '😷', category: 'Smileys' }, { emoji: '🤒', category: 'Smileys' },
-  { emoji: '🤕', category: 'Smileys' }, { emoji: '🤑', category: 'Smileys' }, { emoji: '🤠', category: 'Smileys' },
-  { emoji: '😈', category: 'Smileys' }, { emoji: '👿', category: 'Smileys' }, { emoji: '👹', category: 'Smileys' },
-  { emoji: '👺', category: 'Smileys' }, { emoji: '🤡', category: 'Smileys' }, { emoji: '💩', category: 'Smileys' },
-  { emoji: '👻', category: 'Smileys' }, { emoji: '💀', category: 'Smileys' }, { emoji: '☠️', category: 'Smileys' },
-  { emoji: '👽', category: 'Smileys' }, { emoji: '👾', category: 'Smileys' }, { emoji: '🤖', category: 'Smileys' },
-  { emoji: '🎃', category: 'Smileys' }, { emoji: '😺', category: 'Smileys' }, { emoji: '😸', category: 'Smileys' },
-  { emoji: '😹', category: 'Smileys' }, { emoji: '😻', category: 'Smileys' }, { emoji: '😼', category: 'Smileys' },
-  { emoji: '😽', category: 'Smileys' }, { emoji: '🙀', category: 'Smileys' }, { emoji: '😿', category: 'Smileys' },
-  { emoji: '😾', category: 'Smileys' },
-
-  // === GESTURES & HANDS ===
-  { emoji: '👋', category: 'Gestures' }, { emoji: '🤚', category: 'Gestures' }, { emoji: '🖐️', category: 'Gestures' },
-  { emoji: '✋', category: 'Gestures' }, { emoji: '🖖', category: 'Gestures' }, { emoji: '👌', category: 'Gestures' },
-  { emoji: '🤌', category: 'Gestures' }, { emoji: '🤏', category: 'Gestures' }, { emoji: '✌️', category: 'Gestures' },
-  { emoji: '🤞', category: 'Gestures' }, { emoji: '🫰', category: 'Gestures' }, { emoji: '🤟', category: 'Gestures' },
-  { emoji: '🤘', category: 'Gestures' }, { emoji: '🤙', category: 'Gestures' }, { emoji: '👈', category: 'Gestures' },
-  { emoji: '👉', category: 'Gestures' }, { emoji: '👆', category: 'Gestures' }, { emoji: '🖕', category: 'Gestures' },
-  { emoji: '👇', category: 'Gestures' }, { emoji: '☝️', category: 'Gestures' }, { emoji: '👍', category: 'Gestures' },
-  { emoji: '👎', category: 'Gestures' }, { emoji: '✊', category: 'Gestures' }, { emoji: '👊', category: 'Gestures' },
-  { emoji: '🤛', category: 'Gestures' }, { emoji: '🤜', category: 'Gestures' }, { emoji: '👏', category: 'Gestures' },
-  { emoji: '🙌', category: 'Gestures' }, { emoji: '👐', category: 'Gestures' }, { emoji: '🤲', category: 'Gestures' },
-  { emoji: '🤝', category: 'Gestures' }, { emoji: '🙏', category: 'Gestures' }, { emoji: '✍️', category: 'Gestures' },
-  { emoji: '💅', category: 'Gestures' }, { emoji: '🤳', category: 'Gestures' }, { emoji: '💪', category: 'Gestures' },
-  { emoji: '🦾', category: 'Gestures' }, { emoji: '🦿', category: 'Gestures' }, { emoji: '🦵', category: 'Gestures' },
-  { emoji: '🦶', category: 'Gestures' }, { emoji: '👂', category: 'Gestures' }, { emoji: '🦻', category: 'Gestures' },
-  { emoji: '👃', category: 'Gestures' }, { emoji: '🧠', category: 'Gestures' }, { emoji: '🫀', category: 'Gestures' },
-  { emoji: '🫁', category: 'Gestures' }, { emoji: '🦷', category: 'Gestures' }, { emoji: '🦴', category: 'Gestures' },
-  { emoji: '👀', category: 'Gestures' }, { emoji: '👁️', category: 'Gestures' }, { emoji: '👅', category: 'Gestures' },
-  { emoji: '👄', category: 'Gestures' }, { emoji: '🫦', category: 'Gestures' }, { emoji: '💋', category: 'Gestures' },
-  { emoji: '🩸', category: 'Gestures' },
-
-  // === ANIMALS & NATURE ===
-  { emoji: '🐶', category: 'Animals' }, { emoji: '🐱', category: 'Animals' }, { emoji: '🐭', category: 'Animals' },
-  { emoji: '🐹', category: 'Animals' }, { emoji: '🐰', category: 'Animals' }, { emoji: '🦊', category: 'Animals' },
-  { emoji: '🐻', category: 'Animals' }, { emoji: '🐼', category: 'Animals' }, { emoji: '🐨', category: 'Animals' },
-  { emoji: '🐯', category: 'Animals' }, { emoji: '🦁', category: 'Animals' }, { emoji: '🐮', category: 'Animals' },
-  { emoji: '🐷', category: 'Animals' }, { emoji: '🐸', category: 'Animals' }, { emoji: '🐒', category: 'Animals' },
-  { emoji: '🐔', category: 'Animals' }, { emoji: '🐧', category: 'Animals' }, { emoji: '🐦', category: 'Animals' },
-  { emoji: '🐤', category: 'Animals' }, { emoji: '🦆', category: 'Animals' }, { emoji: '🦅', category: 'Animals' },
-  { emoji: '🦉', category: 'Animals' }, { emoji: '🐺', category: 'Animals' }, { emoji: '🐝', category: 'Animals' },
-  { emoji: '🦋', category: 'Animals' }, { emoji: '🐌', category: 'Animals' }, { emoji: '🐞', category: 'Animals' },
-  { emoji: '🐜', category: 'Animals' }, { emoji: '🕷️', category: 'Animals' }, { emoji: '🐢', category: 'Animals' },
-  { emoji: '🐍', category: 'Animals' }, { emoji: '🦎', category: 'Animals' }, { emoji: '🐙', category: 'Animals' },
-  { emoji: '🦑', category: 'Animals' }, { emoji: '🦀', category: 'Animals' }, { emoji: '🐠', category: 'Animals' },
-  { emoji: '🐟', category: 'Animals' }, { emoji: '🐬', category: 'Animals' }, { emoji: '🐳', category: 'Animals' },
-  { emoji: '🦈', category: 'Animals' }, { emoji: '🐊', category: 'Animals' }, { emoji: '🐅', category: 'Animals' },
-  { emoji: '🐆', category: 'Animals' }, { emoji: '🦓', category: 'Animals' }, { emoji: '🦍', category: 'Animals' },
-  { emoji: '🐘', category: 'Animals' }, { emoji: '🦒', category: 'Animals' }, { emoji: '🦘', category: 'Animals' },
-  { emoji: '🌴', category: 'Animals' }, { emoji: '🍀', category: 'Animals' }, { emoji: '🌸', category: 'Animals' },
-  { emoji: '🌹', category: 'Animals' }, { emoji: '🌻', category: 'Animals' }, { emoji: '🍁', category: 'Animals' },
-
-  // === FOOD & DRINK ===
-  { emoji: '🍏', category: 'Food' }, { emoji: '🍎', category: 'Food' }, { emoji: '🍐', category: 'Food' },
-  { emoji: '🍊', category: 'Food' }, { emoji: '🍋', category: 'Food' }, { emoji: '🍌', category: 'Food' },
-  { emoji: '🍉', category: 'Food' }, { emoji: '🍇', category: 'Food' }, { emoji: '🍓', category: 'Food' },
-  { emoji: '🍈', category: 'Food' }, { emoji: '🍒', category: 'Food' }, { emoji: '🍑', category: 'Food' },
-  { emoji: '🍍', category: 'Food' }, { emoji: '🥝', category: 'Food' }, { emoji: '🍅', category: 'Food' },
-  { emoji: '🍆', category: 'Food' }, { emoji: '🥑', category: 'Food' }, { emoji: '🥦', category: 'Food' },
-  { emoji: '🌶️', category: 'Food' }, { emoji: '🌽', category: 'Food' }, { emoji: '🥕', category: 'Food' },
-  { emoji: '🥔', category: 'Food' }, { emoji: '🍞', category: 'Food' }, { emoji: '🥐', category: 'Food' },
-  { emoji: '🧀', category: 'Food' }, { emoji: '🍳', category: 'Food' }, { emoji: '🥞', category: 'Food' },
-  { emoji: '🥓', category: 'Food' }, { emoji: '🍔', category: 'Food' }, { emoji: '🍟', category: 'Food' },
-  { emoji: '🍕', category: 'Food' }, { emoji: '🌭', category: 'Food' }, { emoji: '🌮', category: 'Food' },
-  { emoji: '🍿', category: 'Food' }, { emoji: '🍨', category: 'Food' }, { emoji: '🍰', category: 'Food' },
-  { emoji: '🍪', category: 'Food' }, { emoji: '🍩', category: 'Food' }, { emoji: '🍯', category: 'Food' },
-  { emoji: '☕', category: 'Food' }, { emoji: '🍵', category: 'Food' }, { emoji: '🥤', category: 'Food' },
-  { emoji: '🍺', category: 'Food' }, { emoji: '🍷', category: 'Food' }, { emoji: '🍸', category: 'Food' },
-
-  // === SYMBOLS ===
-  { emoji: '❤️', category: 'Symbols' }, { emoji: '🧡', category: 'Symbols' }, { emoji: '💛', category: 'Symbols' },
-  { emoji: '💚', category: 'Symbols' }, { emoji: '💙', category: 'Symbols' }, { emoji: '💜', category: 'Symbols' },
-  { emoji: '🖤', category: 'Symbols' }, { emoji: '🤍', category: 'Symbols' }, { emoji: '🤎', category: 'Symbols' },
-  { emoji: '💔', category: 'Symbols' }, { emoji: '❣️', category: 'Symbols' }, { emoji: '💕', category: 'Symbols' },
-  { emoji: '💞', category: 'Symbols' }, { emoji: '💖', category: 'Symbols' }, { emoji: '💗', category: 'Symbols' },
-  { emoji: '💘', category: 'Symbols' }, { emoji: '💌', category: 'Symbols' }, { emoji: '🌟', category: 'Symbols' },
-  { emoji: '✨', category: 'Symbols' }, { emoji: '⚡', category: 'Symbols' }, { emoji: '💥', category: 'Symbols' },
-  { emoji: '🔥', category: 'Symbols' }, { emoji: '💯', category: 'Symbols' }, { emoji: '🎉', category: 'Symbols' },
-  { emoji: '💤', category: 'Symbols' }, { emoji: '💭', category: 'Symbols' }, { emoji: '💬', category: 'Symbols' },
-  { emoji: '🔔', category: 'Symbols' }, { emoji: '🚫', category: 'Symbols' }, { emoji: '❌', category: 'Symbols' },
-  { emoji: '✅', category: 'Symbols' }, { emoji: '⚠️', category: 'Symbols' }, { emoji: '🌐', category: 'Symbols' }
+// ---------------------------------------------------------------------------
+// 1. GUARANTEED POPULAR CURATED LIST FOR TOP QUALITY SORTING
+// ---------------------------------------------------------------------------
+const CURATED_SMILEYS: string[] = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '🥲', '🥹', '😊', '😇', '🙂', '🙃', '😉', '😌',
+  '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🥸',
+  '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢',
+  '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🫣', '🤗',
+  '🫡', '🤔', '🤫', '🤥', '😶', '😐', '😑', '😬', '🫠', '🫨', '🫥', '😯', '😦', '😧', '😮', '😲',
+  '🥱', '😴', '🤤', '😪', '😵', '😵‍💫', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠',
+  '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹',
+  '😻', '😼', '😽', '🙀', '😿', '😾',
+  // Hearts & Romance
+  '❤️', '🩷', '🩵', '🩶', '🖤', '🤍', '🤎', '💜', '💙', '💚', '💛', '🧡', '💔', '❤️‍🔥', '❤️‍🩹', '❣️',
+  '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '💌', '💋', '🏩', '💒',
+  // Hands & Gestures
+  '👋', '🤚', '🖐️', '✋', '🖖', '🫱', '🫲', '🫳', '🫴', '👌', '🤌', '🤏', '✌️', '🤞', '🫰', '🤟',
+  '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '🫵', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏',
+  '🙌', '🫶', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦵', '🦿', '🦶', '👂', '🦻',
+  '👃', '🫀', '🫁', '🧠', '🦷', '🦴', '👀', '👁️', '👅', '👄', '🫦',
+  // People & Figures (Every Gender, Age, Profession, Activity & Family)
+  '👶', '🧒', '👦', '👧', '🧑', '👱', '👨', '🧔', '🧔‍♂️', '🧔‍♀️', '👨‍🦰', '👨‍🦱', '👨‍🦳', '👨‍🦲', '👩', '👩‍🦰', '🧑‍🦰', '👩‍🦱', '🧑‍🦱', '👩‍🦳', '🧑‍🦳', '👩‍🦲', '🧑‍🦲', '👱‍♀️', '👱‍♂️', '🧓', '👴', '👵',
+  '🙍', '🙍‍♂️', '🙍‍♀️', '🙎', '🙎‍♂️', '🙎‍♀️', '🙅', '🙅‍♂️', '🙅‍♀️', '🙆', '🙆‍♂️', '🙆‍♀️', '💁', '💁‍♂️', '💁‍♀️', '🙋', '🙋‍♂️', '🙋‍♀️', '🧏', '🧏‍♂️', '🧏‍♀️', '🙇', '🙇‍♂️', '🙇‍♀️', '🤦', '🤦‍♂️', '🤦‍♀️', '🤷', '🤷‍♂️', '🤷‍♀️',
+  '👨‍⚕️', '👩‍⚕️', '🧑‍⚕️', '👨‍🎓', '👩‍🎓', '🧑‍🎓', '👨‍🏫', '👩‍🏫', '🧑‍🏫', '👨‍⚖️', '👩‍⚖️', '🧑‍⚖️', '👨‍🌾', '👩‍🌾', '🧑‍🌾', '👨‍🍳', '👩‍🍳', '🧑‍🍳', '👨‍🔧', '👩‍🔧', '🧑‍🔧', '👨‍🏭', '👩‍🏭', '🧑‍🏭', '👨‍💼', '👩‍💼', '🧑‍💼', '👨‍🔬', '👩‍🔬', '🧑‍🔬', '👨‍💻', '👩‍💻', '🧑‍💻', '👨‍🎤', '👩‍🎤', '🧑‍🎤', '👨‍🎨', '👩‍🎨', '🧑‍🎨', '👨‍✈️', '👩‍✈️', '🧑‍✈️', '👨‍🚀', '👩‍🚀', '🧑‍🚀', '👨‍🚒', '👩‍🚒', '🧑‍🚒',
+  '👮', '👮‍♂️', '👮‍♀️', '🕵️', '🕵️‍♂️', '🕵️‍♀️', '💂', '💂‍♂️', '💂‍♀️', '👷', '👷‍♂️', '👷‍♀️', '🤴', '👸', '👳', '👳‍♂️', '👳‍♀️', '👲', '🧕', '🤵', '🤵‍♂️', '🤵‍♀️', '👰', '👰‍♂️', '👰‍♀️', '🤰', '🫄', '🫃', '🤱', '👩‍🍼', '👨‍🍼', '🧑‍🍼',
+  '👼', '🎅', '🤶', '🧑‍🎄', '🦸', '🦸‍♂️', '🦸‍♀️', '🦹', '🦹‍♂️', '🦹‍♀️', '🧙', '🧙‍♂️', '🧙‍♀️', '🧚', '🧚‍♂️', '🧚‍♀️', '🧛', '🧛‍♂️', '🧛‍♀️', '🧜', '🧜‍♂️', '🧜‍♀️', '🧝', '🧝‍♂️', '🧝‍♀️', '🧞', '🧞‍♂️', '🧞‍♀️', '🧟', '🧟‍♂️', '🧟‍♀️',
+  '💆', '💆‍♂️', '💆‍♀️', '💇', '💇‍♂️', '💇‍♀️', '🚶', '🚶‍♂️', '🚶‍♀️', '🧍', '🧍‍♂️', '🧍‍♀️', '🧎', '🧎‍♂️', '🧎‍♀️', '🏃', '🏃‍♂️', '🏃‍♀️', '💃', '🕺', '🕴️', '👯', '👯‍♂️', '👯‍♀️', '🧖', '🧖‍♂️', '🧖‍♀️', '🧗', '🧗‍♂️', '🧗‍♀️', '🧘', '🧘‍♂️', '🧘‍♀️', '🛀', '🛌', '⛷️', '🏂', '🏌️', '🏌️‍♂️', '🏌️‍♀️', '🏄', '🏄‍♂️', '🏄‍♀️', '🚣', '🚣‍♂️', '🚣‍♀️', '🏊', '🏊‍♂️', '🏊‍♀️', '⛹️', '⛹️‍♂️', '⛹️‍♀️', '🏋️', '🏋️‍♂️', '🏋️‍♀️', '🚴', '🚴‍♂️', '🚴‍♀️', '🚵', '🚵‍♂️', '🚵‍♀️', '🤸', '🤸‍♂️', '🤸‍♀️', '🤼', '🤼‍♂️', '🤼‍♀️', '🤽', '🤽‍♂️', '🤽‍♀️', '🤾', '🤾‍♂️', '🤾‍♀️', '🤹', '🤹‍♂️', '🤹‍♀️',
+  '👭', '👫', '👬', '🧑‍🤝‍🧑', '💏', '👩‍❤️‍💋‍👨', '👨‍❤️‍💋‍👨', '👩‍❤️‍💋‍👩', '💑', '👩‍❤️‍👨', '👨‍❤️‍👨', '👩‍❤️‍👩', '👪', '👨‍👩‍👦', '👨‍👩‍👧', '👨‍👩‍👧‍👦', '👨‍👩‍👦‍👦', '👨‍👩‍👧‍👧', '👨‍👨‍👦', '👨‍👨‍👧', '👨‍👨‍👧‍👦', '👨‍👨‍👦‍👦', '👨‍👨‍👧‍👧', '👩‍👩‍👦', '👩‍👩‍👧', '👩‍👩‍👧‍👦', '👩‍👩‍👦‍👦', '👩‍👩‍👧‍👧', '👨‍👦', '👨‍👦‍👦', '👨‍👧', '👨‍👧‍👦', '👨‍👧‍👧', '👩‍👦', '👩‍👦‍👦', '👩‍👧', '👩‍👧‍👦', '👩‍👧‍👧', '🗣️', '👤', '👥', '🫂'
 ];
 
-const generateAllEmojis = (): EmojiItem[] => {
-  const list: EmojiItem[] = [];
-  const seen = new Set<string>();
+const CURATED_ANIMALS: string[] = [
+  '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐻‍❄️', '🐨', '🐯', '🦁', '🐮', '🐷', '🐽', '🐸',
+  '🐵', '🙈', '🙉', '🙊', '🐒', '🐔', '🐧', '🐦', '🐤', '🐣', '🐥', '🦆', '🦅', '🦉', '🦇', '🐺',
+  '🐗', '🐴', '🦄', '🐝', '🪱', '🐛', '🦋', '🐌', '🐞', '🐜', '🪰', '🪲', '🪳', '🦟', '🦗', '🕷️',
+  '🕸️', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬',
+  '🐳', '🐋', '🦈', '🦭', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🦣', '🐘', '🦛', '🦏', '🐪', '🐫',
+  '🦒', '🦘', '🦬', '🐃', '🐂', '🐄', '🐎', '🐖', '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮',
+  '🐕‍🦺', '🐈', '🐈‍⬛', '🐓', '🦃', '🦚', '🦜', '🦩', '🕊️', '🐇', '🦝', '🦨', '🦡', '🦫', '🦦', '🦥',
+  '🦔', '🌵', '🎄', '🌲', '🌳', '🌴', '🪵', '🌱', '🌿', '☘️', '🍀', '🎍', '🪴', '🎋', '🍃', '🍂',
+  '🍁', '🍄', '🐚', '🪨', '🌾', '💐', '🌷', '🌹', '🥀', '🪷', '🌺', '🌸', '🌼', '🌻', '🌞', '🌝',
+  '🌛', '🌜', '🌚', '🌕', '🌖', '🌗', '🌘', '🌑', '🌒', '🌓', '🌔', '🌙', '🌎', '🌍', '🌏', '🪐',
+  '💫', '⭐️', '🌟', '✨', '⚡️', '☄️', '💥', '🔥', '🌪️', '🌈', '☀️', '🌤️', '⛅️', '🌥️', '☁️', '🌦️',
+  '🌧️', '⛈️', '🌩️', '🌨️', '❄️', '☃️', '⛄️', '🌬️', '💨', '💧', '💦', '🫧', '☔️', '☂️', '🌊', '🌫️'
+];
 
-  const add = (emoji: string, category: EmojiItem['category']) => {
-    if (!seen.has(emoji) && emoji.trim()) {
-      seen.add(emoji);
-      list.push({ emoji, category });
-    }
-  };
+const CURATED_FOOD: string[] = [
+  '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥',
+  '🥝', '🍅', '🍆', '🥑', '🥦', '🥬', '🥒', '🌶️', '🫑', '🌽', '🥕', '🫒', '🧄', '🧅', '🥔', '🍠',
+  '🫘', '🥐', '🥯', '🍞', '🥖', '🥨', '🧀', '🥚', '🍳', '🧈', '🥞', '🧇', '🥓', '🥩', '🍗', '🍖',
+  '🌭', '🍔', '🍟', '🍕', '🫓', '🥪', '🥙', '🧆', '🌮', '🌯', '🫔', '🥗', '🥘', '🫕', '🥫', '🍝',
+  '🍜', '🍲', '🍛', '🍣', '🍱', '🥟', '🦪', '🍤', '🍙', '🍚', '🍘', '🍥', '🥠', '🥮', '🍢', '🍡',
+  '🍧', '🍨', '🍦', '🥧', '🧁', '🍰', '🎂', '🍮', '🍭', '🍬', '🍫', '🍿', '🍩', '🍪', '🌰', '🥜',
+  '🍯', '🥛', '☕️', '🫖', '🍵', '🧃', '🥤', '🧋', '🍶', '🍺', '🍻', '🥂', '🍷', '🥃', '🍸', '🍹',
+  '🧉', '🍾', '🧊', '🥄', '🍴', '🍽️', '🥣', '🥡', '🥢'
+];
 
-  // 1. Populate hand-curated guaranteed highly popular emojis first
-  CURATED_EMOJIS.forEach(item => add(item.emoji, item.category));
+const CURATED_TRAVEL: string[] = [
+  '🚗', '🚕', '🚙', '🚌', '🛺', '🏎️', '🚓', '🚑', '🚒', '🚐', '🛻', '🚚', '🚛', '🚜', '🛵', '🏍️',
+  '🚲', '🛴', '🚨', '🚔', '🚍', '🚘', '🚖', '🚡', '🚠', '🚟', '🚃', '🚋', '🚝', '🚄', '🚅', '🚆',
+  '🚇', '🚈', '🚉', '🛩️', '✈️', '🛫', '🛬', '🪂', '💺', '🛰️', '🚀', '🛸', '🚁', '🛶', '⛵️', '🚤',
+  '🛥️', '🛳️', '🚢', '⚓️', '🛟', '🏠', '🏡', '🏢', '🏣', '🏥', '🏦', '🏨', '🏩', '🏪', '🏫', '🏬',
+  '🏭', '🏯', '🏰', '💒', '🗼', '🗽', '⛪️', '🕌', '🛕', '🕍', '⛩️', '🕋', '⛲️', '⛺️', '🌁', '🌃',
+  '🏙️', '🌄', '🌅', '🌆', '🌇', '🌉', '♨️', '🎠', '🎡', '🎢', '💈', '🎪', '🗻', '🏖️', '🏝️', '🏜️',
+  '🌋', '🏕️', '🛤️', '🛣️'
+];
 
-  // Helper to add ranges dynamically
-  const addRange = (start: number, end: number, category: EmojiItem['category']) => {
+const CURATED_ACTIVITIES: string[] = [
+  '⚽️', '🏀', '🏈', '⚾️', '🥎', '🎾', '🏐', '🏉', '🥏', '🎱', '🪀', '🏓', '🏸', '🏒', '🏑', '🥍',
+  '🏏', '🪃', '🥅', '⛳️', '🪁', '🏹', '🎣', '🤿', '🥊', '🥋', '🎽', '🛹', '🛼', '🛷', '⛸️', '🥌',
+  '🎿', '⛷️', '🏂', '🪂', '🏋️‍♀️', '🏋️‍♂️', '🤼‍♀️', '🤼‍♂️', '🤸‍♀️', '🤸‍♂️', '⛹️‍♀️', '⛹️‍♂️', '🤺', '🤾‍♀️',
+  '🤾‍♂️', '🏌️‍♀️', '🏌️‍♂️', '🏇', '🧘‍♀️', '🧘‍♂️', '🏄‍♀️', '🏄‍♂️', '🏊‍♀️', '🏊‍♂️', '🤽‍♀️', '🤽‍♂️', '🚣‍♀️',
+  '🚣‍♂️', '🧗‍♀️', '🧗‍♂️', '🚵‍♀️', '🚵‍♂️', '🚴‍♀️', '🚴‍♂️', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '🏵️', '🎗️',
+  '🎫', '🎟️', '🎪', '🤹', '🎭', '🩰', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁', '🪘', '🎷', '🎺',
+  '🪗', '🎸', '🪕', '🎻', '🎲', '♟️', '🎯', '🎳', '🎮', '🎰', '🧩', '🎉', '🎊', '🎈', '🎂', '🎁',
+  '🪅', '🎆', '🎇'
+];
+
+const CURATED_OBJECTS: string[] = [
+  '📱', '📲', '💻', '⌨️', '🖥️', '🖨️', '🖱️', '🕹️', '💽', '💾', '💿', '📀', '📼', '📷', '📸', '📹',
+  '🎥', '📽️', '🎞️', '📞', '☎️', '📟', '📠', '📺', '📻', '🎙️', '🎚️', '🎛️', '⏱️', '⏲️', '⏰', '🕰️',
+  '⏳', '⌛️', '📡', '🔋', '🔌', '💡', '🔦', '🕯️', '🧯', '💸', '💵', '💴', '💶', '💷', '💰', '💳',
+  '💎', '⚖️', '🧰', '🔧', '🔨', '⚒️', '🛠️', '⛏️', '🔩', '⚙️', '🧱', '⛓️', '🧲', '🔫', '💣', '🔪',
+  '🗡️', '⚔️', '🛡️', '💈', '🧪', '🧫', '🧬', '🔬', '🔭', '💉', '🩸', '💊', '🩹', '🩺', '🌡️', '🚪',
+  '🪞', '🪟', '🛏️', '🛋️', '🚽', '🚿', '🛁', '🪒', '🧴', '🧷', '🧹', '🧺', '🧻', '🧼', '🪠', '🧽',
+  '🔑', '🗝️', '🔒', '🔓', '🔏', '🔐', '🏷️', '🔍', '🔎', '📦', '📫', '📬', '📭', '📮', '👓', '🕶️',
+  '🥽', '🥼', '🦺', '👔', '👕', '👖', '🧣', '🧤', '🧥', '🧦', '👗', '👘', '🥻', '🩱', '🩲', '🩳',
+  '👙', '👚', '👛', '👜', '👝', '🎒', '👞', '👟', '🥾', '🥿', '👠', '👡', '🩰', '👢', '👑', '👒',
+  '🎩', '🎓', '🧢', '⛑️', '💄', '💍', '💼', '🧳', '☂️', '🌂', '🚬', '⚰️', '🪦', '⚱️', '🔮', '🧿',
+  '📿'
+];
+
+const CURATED_SYMBOLS: string[] = [
+  '♈️', '♉️', '♊️', '♋️', '♌️', '♍️', '♎️', '♏️', '♐️', '♑️', '♒️', '♓️', '⛎', '☮️', '✝️', '☪️',
+  '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐', '⚠️', '🚫', '⛔️', '🔞', '☢️', '☣️', '🚸', '📵',
+  '🚯', '🚱', '🚷', '⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️', '↕️', '↔️', '↩️', '↪️', '⤴️',
+  '⤵️', '🔀', '🔁', '🔂', '🔄', '🔃', '➕', '➖', '➗', '✖️', '♾️', '💲', '💱', '™️', '©️', '®️',
+  '✔️', '☑️', '🔘', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫️', '⚪️', '🟤', '🔺', '🔻', '🔶', '🔷',
+  '🔸', '🔹', '▪️', '▫️', '◾️', '◽️', '◼️', '◻️', '⬛️', '⬜️', '🎵', '🎶', '🔇', '🔈', '🔉', '🔊',
+  '🔔', '🔕', '📣', '📢', '🏁', '🚩', '🎌', '🏴', '🏳️', '🏳️‍🌈', '🏳️‍⚧️', '🏴‍☠️', '🇮🇳', '🇺🇸', '🇬🇧', '🇯🇵',
+  '🇨🇦', '🇦🇺', '🇩🇪', '🇫🇷', '🇮🇹', '🇪🇸', '🇧🇷', '🇲🇽', '🇷🇺', '🇰🇷', '🇸🇬', '🇦🇪', '🇨🇳', '🇳🇿', '🇿🇦', '🇸🇦',
+  '🇹🇷', '🇵🇰', '🇧🇩', '🇱🇰', '🇳🇵', '🇮🇩', '🇲🇾', '🇹🇭', '🇻🇳', '🇵🇭', '🇪🇬', '🇳🇬', '🇦🇷', '🇨🇱', '🇨🇴', '🇵🇪',
+  '🇨🇭', '🇳🇱', '🇸🇪', '🇳🇴', '🇩🇰', '🇫🇮', '🇵🇱', '🇺🇦', '🇬🇷', '🇵🇹', '🇮🇪', '🇦🇹', '🇧🇪'
+];
+
+// ---------------------------------------------------------------------------
+// 2. DYNAMIC UNICODE ENGINE FOR MAXIMUM FULL GBOARD COVERAGE
+// ---------------------------------------------------------------------------
+const buildCategoryWithRanges = (curated: string[], ranges: [number, number][]): string[] => {
+  const set = new Set<string>(curated);
+  ranges.forEach(([start, end]) => {
     for (let cp = start; cp <= end; cp++) {
       try {
-        const emoji = String.fromCodePoint(cp);
-        add(emoji, category);
+        const char = String.fromCodePoint(cp);
+        if (char && char.trim()) {
+          set.add(char);
+        }
       } catch (e) {}
     }
-  };
-
-  // 2. Smileys & Faces: Extensive loop
-  addRange(0x1F600, 0x1F64F, 'Smileys');
-  addRange(0x1F910, 0x1F92F, 'Smileys'); 
-  addRange(0x1F970, 0x1F97F, 'Smileys'); 
-  addRange(0x1F9D0, 0x1F9DF, 'Smileys'); 
-
-  // 3. Hand Gestures, Body & Extra Hearts
-  addRange(0x1F440, 0x1F48F, 'Gestures');
-  addRange(0x1F490, 0x1F49F, 'Symbols'); 
-  addRange(0x1F90F, 0x1F90F, 'Gestures'); 
-  addRange(0x1F91A, 0x1F91F, 'Gestures'); 
-  addRange(0x1F930, 0x1F93F, 'Gestures'); 
-  addRange(0x1FA70, 0x1FA7C, 'Symbols'); 
-
-  // 4. Animals & Nature
-  addRange(0x1F400, 0x1F43F, 'Animals'); 
-  addRange(0x1F980, 0x1F9AE, 'Animals'); 
-  addRange(0x1F9B0, 0x1F9B9, 'Animals'); 
-  addRange(0x1F330, 0x1F353, 'Animals'); 
-  addRange(0x1F300, 0x1F30F, 'Animals'); // Blossoms, flowers
-
-  // 5. Food & Drinks
-  addRange(0x1F354, 0x1F37F, 'Food'); 
-  addRange(0x1F950, 0x1F96F, 'Food'); 
-  addRange(0x1F9C0, 0x1F9CF, 'Food'); 
-
-  // 6. Travel & Weather
-  addRange(0x1F300, 0x1F32F, 'Travel'); 
-  addRange(0x1F680, 0x1F6FF, 'Travel'); 
-
-  // 7. Activities & Sports
-  addRange(0x1F380, 0x1F3CF, 'Activities'); 
-  addRange(0x1F940, 0x1F94F, 'Activities'); 
-
-  // 8. Objects
-  addRange(0x1F4A0, 0x1F5FF, 'Objects'); 
-  addRange(0x1F9E0, 0x1F9FF, 'Objects'); 
-  addRange(0x1FA90, 0x1FA9F, 'Objects'); 
-
-  // 9. Symbols & Flags
-  addRange(0x2600, 0x26FF, 'Symbols');   
-  addRange(0x2700, 0x27BF, 'Symbols');   
-  addRange(0x1F1E6, 0x1F1FF, 'Symbols'); 
-
-  return list;
+  });
+  return Array.from(set);
 };
 
-export const ALL_EMOJIS = generateAllEmojis();
+export const SMILEYS_EMOJIS: string[] = buildCategoryWithRanges(CURATED_SMILEYS, [
+  [0x1F600, 0x1F64F], // Smileys & Emotions
+  [0x1F910, 0x1F92F], // Extended Smileys (zipper, money, nerd, thinking, face with thermometer)
+  [0x1F970, 0x1F97F], // Extra faces (smiling with hearts, pleading, partying, woozy, hot, cold)
+  [0x1FAE0, 0x1FAF8], // Unicode 14/15 (shaking face, melting face, saluting, biting lip, heart hands)
+  [0x1F9D0, 0x1F9DF], // Monocle, superheroes, magicians, zombies, elves, genies
+  [0x1F440, 0x1F48F], // Hands, gestures, faces, kissing, couples
+  [0x1F90C, 0x1F90F], // Pinched fingers, pinching hand
+  [0x1F918, 0x1F91F], // Sign of horns, call me, fist, handshake
+  [0x1F930, 0x1F93F], // Pregnant, selfie, shrug, facepalm
+  [0x1F490, 0x1F49F], // Hearts, sparkle heart, cupid
+  [0x1FA75, 0x1FA7C], // Pink heart, light blue heart, grey heart
+]);
+
+export const ANIMALS_EMOJIS: string[] = buildCategoryWithRanges(CURATED_ANIMALS, [
+  [0x1F400, 0x1F43F], // Animals & Pets
+  [0x1F980, 0x1F9AE], // Wild animals, birds, insects, sea creatures
+  [0x1F9B0, 0x1F9B9], // Kangaroo, llama, peacock, swan, lobster
+  [0x1FA70, 0x1FA74], // Guide dog, service dog, sloth, otter, flamingo
+  [0x1FACE, 0x1FACF], // Moose, donkey, wing, goose, jellyfish, blackbird
+  [0x1FABB, 0x1FABF], // Hyacinth, ginger, pea pod, lotus, potted plant
+  [0x1F330, 0x1F353], // Plants, trees, flowers, fruit trees
+  [0x1F300, 0x1F32F], // Nature, weather, stars, sky
+]);
+
+export const FOOD_EMOJIS: string[] = buildCategoryWithRanges(CURATED_FOOD, [
+  [0x1F354, 0x1F37F], // Fast foods, meals, drinks
+  [0x1F950, 0x1F96F], // Croissant, bacon, sandwich, dumpling, canned food
+  [0x1F9C0, 0x1F9CF], // Cheese, waffle, butter, falafel, bubble tea
+  [0x1FAD0, 0x1FADC], // Blueberries, olive, bell pepper, teapot, beans, jar, pouring liquid
+]);
+
+export const TRAVEL_EMOJIS: string[] = buildCategoryWithRanges(CURATED_TRAVEL, [
+  [0x1F680, 0x1F6FF], // Transport, vehicles, trains, aircraft, ships
+  [0x1F3E0, 0x1F3FF], // Houses, buildings, castles, hospitals, bridges
+  [0x1FA80, 0x1FA88], // Parachute, ring buoy, playground slide, wheel
+  [0x1F6D0, 0x1F6DF], // Hindu temple, hut, elevator
+]);
+
+export const ACTIVITIES_EMOJIS: string[] = buildCategoryWithRanges(CURATED_ACTIVITIES, [
+  [0x1F380, 0x1F3CF], // Celebration, sports balls, gaming, music
+  [0x1F940, 0x1F94F], // Martial arts, boxing, curling, lacrosse
+  [0x1FA80, 0x1FA8F], // Yo-yo, kite, boomerang, piñata, nesting dolls, maracas, flute
+]);
+
+export const OBJECTS_EMOJIS: string[] = buildCategoryWithRanges(CURATED_OBJECTS, [
+  [0x1F4A0, 0x1F5FF], // Objects, electronics, office, tools, household
+  [0x1F9E0, 0x1F9FF], // Brain, yarn, fire extinguisher, toolbox, magnet
+  [0x1FA90, 0x1FAAF], // Mirror, ladder, window, plunger, toothbrush, crutch, x-ray, disco ball, fan
+]);
+
+export const SYMBOLS_EMOJIS: string[] = buildCategoryWithRanges(CURATED_SYMBOLS, [
+  [0x2600, 0x26FF],   // Miscellaneous symbols
+  [0x2700, 0x27BF],   // Dingbats
+  [0x1F7E0, 0x1F7EB], // Large colored circles & squares
+  [0x1FA77, 0x1FA7A], // Khanda, hamsa, pink/blue/grey hearts
+  [0x1F1E6, 0x1F1FF], // Flag regional indicator codes
+]);
+
+export const POPULAR_REACTION_EMOJIS: string[] = [
+  ...SMILEYS_EMOJIS,
+  ...ANIMALS_EMOJIS,
+  ...FOOD_EMOJIS,
+  ...TRAVEL_EMOJIS,
+  ...ACTIVITIES_EMOJIS,
+  ...OBJECTS_EMOJIS,
+  ...SYMBOLS_EMOJIS,
+];
+
+export const ALL_EMOJI_LIST: string[] = Array.from(new Set(POPULAR_REACTION_EMOJIS));
+
+export const ALL_EMOJIS: EmojiItem[] = [
+  ...SMILEYS_EMOJIS.map(emoji => ({ emoji, category: 'Smileys' as const })),
+  ...ANIMALS_EMOJIS.map(emoji => ({ emoji, category: 'Animals' as const })),
+  ...FOOD_EMOJIS.map(emoji => ({ emoji, category: 'Food' as const })),
+  ...TRAVEL_EMOJIS.map(emoji => ({ emoji, category: 'Travel' as const })),
+  ...ACTIVITIES_EMOJIS.map(emoji => ({ emoji, category: 'Activities' as const })),
+  ...OBJECTS_EMOJIS.map(emoji => ({ emoji, category: 'Objects' as const })),
+  ...SYMBOLS_EMOJIS.map(emoji => ({ emoji, category: 'Symbols' as const })),
+];

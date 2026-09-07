@@ -1,16 +1,18 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Image } from 'expo-image';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  SafeAreaView, Platform, ActivityIndicator, RefreshControl,
+  Platform, ActivityIndicator, RefreshControl, BackHandler,
   PanResponder, Animated, StatusBar, Alert, Modal, DeviceEventEmitter
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '@/src/store/authStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useReelsStore } from '@/src/store/reelsStore';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useNavigation } from 'expo-router';
+import { TabActions } from '@react-navigation/native';
 import { useAppTheme } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { scale, verticalScale, moderateScale, moderateFont } from '@/src/utils/responsive';
@@ -20,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 import { PostOptionsModal } from '@/components/PostOptionsModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DeleteEngine } from '@/src/engines/DeleteEngine';
 
 
 const SIZES = {
@@ -114,9 +117,23 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const styles = getStyles(COLORS, insets);
   const router = useSafeRouter();
+  const navigation = useNavigation();
   const { user, setAuth, logout, toggleAnonymousMode } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'posts' | 'shots' | 'saved'>('posts');
   const isAnonymous = user?.isAnonymousMode;
+
+  // 🚀 Android back button: go to Home (index) instead of Discover (explore)
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        // navigation IS the tab navigator inside a tab screen
+        navigation.dispatch(TabActions.jumpTo('index'));
+        return true; // prevent default back
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => sub.remove();
+    }, [navigation])
+  );
 
   const [editGhostModalVisible, setEditGhostModalVisible] = useState(false);
   const [updatingAvatar, setUpdatingAvatar] = useState(false);
@@ -389,9 +406,9 @@ export default function ProfileScreen() {
   const handleDeletePost = async (postId: string) => {
     try {
       setDeletingId(postId);
-      await apiClient.delete(`/posts/${postId}`);
+      DeleteEngine.purgePostFromAllCaches(String(postId));
       setPosts(prev => {
-        const updated = prev.filter(p => (p.id || p._id) !== postId);
+        const updated = prev.filter(p => String(p.id || p._id) !== String(postId));
         void setCache(!!isAnonymous, { posts: updated });
         return updated;
       });
@@ -400,6 +417,7 @@ export default function ProfileScreen() {
         void setCache(!!isAnonymous, { profileData: updatedProfile });
         return updatedProfile;
       });
+      await apiClient.delete(`/posts/${postId}`);
     } catch (err) {
     } finally {
       setDeletingId(null);
@@ -828,7 +846,8 @@ export default function ProfileScreen() {
               params: { postType: 'post', isAnonymous: 'true' }
             } as any);
           } else {
-            router.push('/create');
+            // 🚀 Use jumpTo (no scroll animation) — navigation IS the tab navigator
+            navigation.dispatch(TabActions.jumpTo('create'));
           }
         }}
         activeOpacity={0.8}
@@ -956,26 +975,31 @@ export default function ProfileScreen() {
 
 const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: number; right: number }) => {
   const { width: screenWidth } = Dimensions.get('window');
-  // Bottom nav height: 56dp icon area + safe bottom inset
   const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 8 : 0);
   const navBarHeight = 56 + safeBottom;
-  // Grid item: 3 columns with 2px margin each side
-  const gridItemWidth = screenWidth / 3 - 4;
+  // Grid item: 3 columns with 2px margin each side capped at max container width
+  const effectiveWidth = Math.min(screenWidth, 640);
+  const gridItemWidth = Math.floor((effectiveWidth - 16) / 3);
 
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center',
     paddingHorizontal: scale(20),
-    paddingTop: insets.top > 0 ? insets.top + 6 : (Platform.OS === 'ios' ? verticalScale(35) : verticalScale(20)),
-    paddingBottom: verticalScale(2),
-    paddingRight: scale(20),
+    paddingTop: verticalScale(6),
+    paddingBottom: verticalScale(6),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   headerTitle: { fontSize: moderateFont(18), fontWeight: 'bold', color: COLORS.text, letterSpacing: 1 },
 
   profileCard: {
     backgroundColor: COLORS.background, marginHorizontal: moderateScale(10), marginTop: 0, borderRadius: 20,
-    padding: moderateScale(10), alignItems: 'center', elevation: 0, // Tightened card margins and padding
+    padding: moderateScale(10), alignItems: 'center', elevation: 0,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   anonymousCard: { backgroundColor: '#0A0A0A', marginTop: 15 },
 
@@ -986,7 +1010,7 @@ const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: num
     position: 'relative',
     width: moderateScale(85),
     height: moderateScale(85),
-    marginTop: moderateScale(2), // Tightened avatar top spacing
+    marginTop: moderateScale(2),
   },
   avatarShadowBox: {
     position: 'absolute',
@@ -994,8 +1018,8 @@ const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: num
     height: moderateScale(85),
     borderRadius: moderateScale(85) / 2,
     backgroundColor: COLORS.surface,
-    top: 1,
-    left: 12,
+    top: 0,
+    left: 0,
   },
   swipeArrow: {
     padding: 9,
@@ -1008,6 +1032,8 @@ const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: num
     position: 'absolute',
     width: moderateScale(85), height: moderateScale(85), borderRadius: moderateScale(85) / 2,
     borderWidth: 0, borderColor: 'transparent', overflow: 'hidden', backgroundColor: COLORS.surface,
+    top: 0,
+    left: 0,
   },
   avatar: {
     width: '100%', height: '100%',
@@ -1018,15 +1044,15 @@ const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: num
     borderWidth: 2, borderColor: '#FFF'
   },
 
-  swipeHintBox: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 }, // Reduced from 20
+  swipeHintBox: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
   swipeText: { fontSize: 10, color: COLORS.subtitle, fontWeight: '700', textTransform: 'uppercase' },
 
-  name: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginTop: 8 }, // Reduced from 15 and size 22 to 20
+  name: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginTop: 8 },
   username: { fontSize: 13, color: COLORS.subtitle, fontWeight: '600', marginTop: 1 },
-  bioText: { fontSize: 13, color: COLORS.subtitle, textAlign: 'center', marginTop: 6, paddingHorizontal: 20 }, // Reduced from 8
+  bioText: { fontSize: 13, color: COLORS.subtitle, textAlign: 'center', marginTop: 6, paddingHorizontal: 20 },
 
   statsRow: {
-    flexDirection: 'row', width: '100%', marginTop: 10, paddingVertical: 5, // Tighter stats spacing
+    flexDirection: 'row', width: '100%', maxWidth: 480, marginTop: 10, paddingVertical: 5, alignSelf: 'center',
   },
   statBox: { flex: 1, alignItems: 'center' },
   statValue: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, letterSpacing: 0.5 },
@@ -1059,20 +1085,37 @@ const getStyles = (COLORS: any, insets: { top: number; bottom: number; left: num
 
   editBtn: {
     flex: 1, backgroundColor: COLORS.primary,
-    paddingVertical: 7, borderRadius: 10, alignItems: 'center',
+    paddingVertical: 8, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
   },
-  editBtnText: { color: COLORS.white, fontWeight: 'bold', fontSize: 12 },
+  editBtnText: { color: COLORS.white, fontWeight: 'bold', fontSize: 13 },
 
-  actionRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 10, gap: 10 }, // Reduced from 20
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    marginTop: 10,
+    gap: 10,
+    width: '100%',
+    maxWidth: 440,
+    alignSelf: 'center',
+  },
   friendsPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: 12,
   },
   friendsCount: { fontSize: 14, fontWeight: '800', color: COLORS.text },
   friendsLabel: { fontSize: 11, color: COLORS.subtitle, fontWeight: '600' },
 
-  contentSection: { flex: 1, backgroundColor: COLORS.background, marginTop: 10 }, // Reduced from 20
+  contentSection: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    marginTop: 10,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
+  },
   universeTabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingHorizontal: 10 },
   univTab: { flex: 1, paddingVertical: 10, alignItems: 'center' }, // Reduced from 15
   activeUnivTab: { borderBottomWidth: 3, borderBottomColor: COLORS.secondary },

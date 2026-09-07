@@ -1,5 +1,6 @@
-﻿import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Platform, ActivityIndicator, DeviceEventEmitter } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, ActivityIndicator, DeviceEventEmitter } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 import { useAppTheme } from '@/src/theme/colors';

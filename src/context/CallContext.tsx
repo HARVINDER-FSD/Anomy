@@ -2,8 +2,29 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { socketService } from '@/src/lib/socket';
 import { useAuthStore } from '@/src/store/authStore';
 import { Alert, Vibration, Platform } from 'react-native';
-import { Audio } from 'expo-av';
 import { Camera } from 'expo-camera';
+
+// 🚀 Safe expo-audio Imports (With dev fallback if native build pending)
+let createAudioPlayer: any = (asset: any) => ({
+  loop: false,
+  volume: 1.0,
+  play: () => {},
+  pause: () => {},
+  remove: () => {},
+});
+let setAudioModeAsync: any = () => Promise.resolve();
+let requestRecordingPermissionsAsync: any = () => Promise.resolve({ status: 'granted' });
+
+try {
+  const ExpoAudio = require('expo-audio');
+  if (ExpoAudio) {
+    if (ExpoAudio.createAudioPlayer) createAudioPlayer = ExpoAudio.createAudioPlayer;
+    if (ExpoAudio.setAudioModeAsync) setAudioModeAsync = ExpoAudio.setAudioModeAsync;
+    if (ExpoAudio.requestRecordingPermissionsAsync) {
+      requestRecordingPermissionsAsync = ExpoAudio.requestRecordingPermissionsAsync;
+    }
+  }
+} catch (_) {}
 
 // 🚀 Safe WebRTC Imports
 let RTCPeerConnection: any;
@@ -228,11 +249,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsSpeaker(false);
     if (Platform.OS !== 'web') {
       Vibration.cancel();
-      Audio.setAudioModeAsync({
+      setAudioModeAsync({
         allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+        playsInSilentMode: true,
         staysActiveInBackground: true,
-        playThroughEarpieceAndroid: true, // Default to earpiece
       }).catch(() => {});
     }
   };
@@ -293,15 +313,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const playSound = async (type: 'ringtone' | 'calling') => {
     try {
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        try { soundRef.current.pause(); } catch (_) {}
+        try { soundRef.current.remove(); } catch (_) {}
+        soundRef.current = null;
       }
 
       if (Platform.OS !== 'web') {
-        await Audio.setAudioModeAsync({
+        await setAudioModeAsync({
           allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
+          playsInSilentMode: true,
           staysActiveInBackground: true,
-          playThroughEarpieceAndroid: type === 'calling', // Calling plays in earpiece, ringtone plays in speaker
         }).catch(() => {});
       }
       
@@ -312,9 +333,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         soundAsset = require('@/assets/sounds/calling.mp3');
       }
 
-      const { sound } = await Audio.Sound.createAsync(soundAsset, { isLooping: true });
-      soundRef.current = sound;
-      await sound.playAsync();
+      const player = createAudioPlayer(soundAsset);
+      player.loop = true;
+      player.volume = 1.0;
+      soundRef.current = player;
+      player.play();
     } catch (e) {
     }
   };
@@ -323,16 +346,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       if (soundRef.current) {
         try {
-          await soundRef.current.stopAsync();
-        } catch (e) {
-        }
+          soundRef.current.pause();
+        } catch (e) {}
         try {
-          await soundRef.current.unloadAsync();
-        } catch (e) {
-        }
+          soundRef.current.remove();
+        } catch (e) {}
         soundRef.current = null;
       }
-      // Also cancel vibration
       if (Platform.OS !== 'web') {
         Vibration.cancel();
       }
@@ -535,17 +555,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       socketService.socket?.off('call:ice-candidate');
       socketService.socket?.off('call:user_offline');
     };
-  }, [currentUser, handleCallEnded]);
+  }, [currentUser?.id, handleCallEnded]);
 
   const setCallAudioMode = async (isVideo: boolean, useSpeaker: boolean) => {
     if (Platform.OS === 'web') return;
     try {
-      await Audio.setAudioModeAsync({
+      await setAudioModeAsync({
         allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+        playsInSilentMode: true,
         staysActiveInBackground: true,
-        playThroughEarpieceAndroid: false, // Always use speaker for calls
-        shouldDuckAndroid: false,
       });
       
       // Small delay to ensure audio mode is applied
@@ -564,10 +582,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const requestPermissions = async (isVideo: boolean) => {
     try {
-      
-      // Request audio permission
-      const { status: audioStatus } = await Audio.requestPermissionsAsync();
-      if (audioStatus !== 'granted') {
+      let audioGranted = true;
+      try {
+        const { status: audioStatus } = await requestRecordingPermissionsAsync();
+        audioGranted = audioStatus === 'granted';
+      } catch (_) {}
+
+      if (!audioGranted) {
         Alert.alert(
           'Permission Required',
           'Microphone permission is required for calls. Please enable it in your device settings.',

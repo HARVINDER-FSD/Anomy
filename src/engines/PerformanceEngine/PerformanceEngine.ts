@@ -44,6 +44,26 @@ export interface TimelineEntry {
   cacheHit?: boolean;
 }
 
+export interface MediaUploadMetric {
+  originalSizeBytes: number;
+  compressedSizeBytes: number;
+  compressionRatioPercent: number;
+  compressionTimeMs: number;
+  uploadDurationMs: number;
+  success: boolean;
+  mediaType: 'image' | 'video';
+  folder: string;
+  timestamp: number;
+}
+
+export interface MediaPlaybackMetric {
+  mediaId: string;
+  startupTimeMs: number;
+  cacheHit: boolean;
+  error: boolean;
+  timestamp: number;
+}
+
 class PerformanceEngine {
   private static instance: PerformanceEngine;
 
@@ -60,6 +80,8 @@ class PerformanceEngine {
     Stories: { category: 'Stories', hits: 0, misses: 0 },
     Explore: { category: 'Explore', hits: 0, misses: 0 },
   };
+  private mediaUploadMetrics: MediaUploadMetric[] = [];
+  private mediaPlaybackMetrics: MediaPlaybackMetric[] = [];
   private renderHeatmap: Record<string, number> = {};
   private alerts: AlertMetric[] = [];
   private isOverlayVisible: boolean = false;
@@ -349,6 +371,21 @@ class PerformanceEngine {
     this.notifyUpdate();
   }
 
+  // ─── 8. Media Performance Tracking ───
+  public trackMediaUpload(metric: Omit<MediaUploadMetric, 'timestamp'>) {
+    const entry: MediaUploadMetric = { ...metric, timestamp: Date.now() };
+    this.mediaUploadMetrics.unshift(entry);
+    if (this.mediaUploadMetrics.length > 50) this.mediaUploadMetrics.pop();
+    this.notifyUpdate();
+  }
+
+  public trackMediaPlayback(metric: Omit<MediaPlaybackMetric, 'timestamp'>) {
+    const entry: MediaPlaybackMetric = { ...metric, timestamp: Date.now() };
+    this.mediaPlaybackMetrics.unshift(entry);
+    if (this.mediaPlaybackMetrics.length > 50) this.mediaPlaybackMetrics.pop();
+    this.notifyUpdate();
+  }
+
   // ─── Snapshot & Export ───
   public getSnapshot() {
     const currentMetric = this.screenMetrics[this.currentScreenName];
@@ -371,6 +408,8 @@ class PerformanceEngine {
       cacheMetrics: this.cacheMetrics,
       apiMetrics: this.apiMetrics.slice(0, 5),
       socketMetrics: this.socketMetrics.slice(0, 5),
+      mediaUploads: this.mediaUploadMetrics.slice(0, 5),
+      mediaPlaybacks: this.mediaPlaybackMetrics.slice(0, 5),
       alerts: this.alerts.slice(0, 5),
       isOverlayVisible: this.isOverlayVisible,
     };

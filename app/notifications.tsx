@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, RefreshControl, Platform, Alert, Animated, PanResponder, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, RefreshControl, Platform, Alert, Animated, PanResponder, Dimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/store/authStore';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -635,13 +636,16 @@ const styles = StyleSheet.create({
   header: { 
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(45) : verticalScale(40)
+    paddingTop: verticalScale(6),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   backBtn: { marginRight: 15 },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, flex: 1 },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text, flex: 1 },
   readAllBtn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: COLORS.surface, borderRadius: 15 },
   readAllText: { color: COLORS.secondary, fontSize: 13, fontWeight: '700' },
-  listContent: { paddingVertical: 10 },
+  listContent: { paddingVertical: 10, width: '100%', maxWidth: 640, alignSelf: 'center' },
   notificationWrapper: { borderBottomWidth: 0.5, borderBottomColor: COLORS.border + '50' },
   swipeContainer: { 
     position: 'relative', 

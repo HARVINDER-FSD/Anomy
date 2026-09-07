@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, SafeAreaView, ActivityIndicator, Alert, Platform, TextInput, Modal, Pressable } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, Alert, Platform, TextInput, Modal, Pressable } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
@@ -12,6 +13,7 @@ import { BlurView } from 'expo-blur';
 import { useAuthStore } from '@/src/store/authStore';
 import { useFollowStatus } from '@/src/hooks/useFollowStatus';
 import { useRelationshipStore } from '@/src/store/relationshipStore';
+import { useChatStore } from '@/src/store/chatStore';
 import { VerifiedTick } from '@/src/components/common/VerifiedTick';
 import { FollowButton } from '@/src/components/common/FollowButton';
 import { FlashList } from '@shopify/flash-list';
@@ -109,32 +111,61 @@ export default function FollowListScreen() {
 
 
   const handleMessageUser = async (targetUser: any) => {
-    try {
-      setLoading(true);
-      const { useAuthStore } = await import('@/src/store/authStore');
-      const currentUser = useAuthStore.getState().user;
+    if (!targetUser) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      const res = await apiClient.post('/users/conversations', {
-        recipientId: targetUser._id || targetUser.id,
-        isAnonymous: currentUser?.isAnonymousMode === true,
+    const rid = String(targetUser._id || targetUser.id || '');
+    const un = targetUser.username || '';
+    const av = targetUser.profileImage || targetUser.avatar_url || targetUser.avatar || '';
+    const currentUser = useAuthStore.getState().user;
+    const isAnon = currentUser?.isAnonymousMode === true;
+
+    // 🚀 INSTANT TAP & OPEN (0ms): Check if conversation already exists in cached Zustand store
+    const storeConvs = useChatStore.getState().conversations || [];
+    const existingConv = storeConvs.find((c: any) => {
+      const matchAnon = isAnon ? c.is_anonymous === true : !c.is_anonymous;
+      return matchAnon && c.participants?.some((p: any) => {
+        const pId = String(p.user?._id || p.user?.id || p.user || p._id || p.id || p);
+        return pId === rid;
       });
-      const conversationId = res.data?.data?.conversation?.id || res.data?.data?.conversation?._id;
+    });
+
+    const q = new URLSearchParams();
+    q.set('recipientId', rid);
+    q.set('username', un);
+    if (av) q.set('profileImage', String(av));
+    if (isAnon) q.set('isAnonymousChat', 'true');
+
+    if (existingConv) {
+      const convId = existingConv._id || existingConv.id;
+      router.push(`/chat/${convId}?${q.toString()}` as any);
+      return;
+    }
+
+    // 🚀 If brand new, fetch conversation ID without freezing screen UI
+    try {
+      const res = await apiClient.post('/users/conversations', {
+        recipientId: rid,
+        isAnonymous: isAnon,
+      });
+      const convData = res.data?.data;
+      const conversationId = convData?.conversation?.id || convData?.conversation?._id;
+
+      if (convData?.conversation) {
+        const storeConvs = useChatStore.getState().conversations || [];
+        useChatStore.getState().setConversations([
+          convData.conversation,
+          ...storeConvs.filter((c: any) => (c._id || c.id) !== conversationId)
+        ]);
+      }
+
       if (!conversationId) {
         Alert.alert('Error', 'Could not start conversation.');
         return;
       }
-      const q = new URLSearchParams();
-      q.set('recipientId', String(targetUser._id || targetUser.id));
-      q.set('username', targetUser.username || '');
-      if (targetUser.profileImage || targetUser.avatar_url || targetUser.avatar) {
-        q.set('profileImage', String(targetUser.profileImage || targetUser.avatar_url || targetUser.avatar));
-      }
-      if (currentUser?.isAnonymousMode) q.set('isAnonymousChat', 'true');
       router.push(`/chat/${conversationId}?${q.toString()}` as any);
     } catch (error: any) {
       Alert.alert('Error', error?.response?.data?.message || 'Could not start conversation.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -429,9 +460,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: scale(20), paddingBottom: verticalScale(12), borderBottomWidth: 0,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(55) : verticalScale(50),
-    backgroundColor: COLORS.background
+    paddingHorizontal: scale(20), paddingBottom: verticalScale(10), borderBottomWidth: 0,
+    paddingTop: verticalScale(6),
+    backgroundColor: COLORS.background,
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   headerTitle: { fontSize: moderateFont(18), fontWeight: '700', color: COLORS.text },
 
@@ -440,6 +472,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
     marginBottom: verticalScale(10),
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   tabBtn: {
     flex: 1,
@@ -464,6 +497,7 @@ const styles = StyleSheet.create({
     paddingBottom: verticalScale(10),
     borderBottomWidth: 0,
     borderBottomColor: 'transparent',
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   searchBar: {
     flexDirection: 'row',
@@ -487,7 +521,7 @@ const styles = StyleSheet.create({
   },
 
   centerNode: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { paddingHorizontal: scale(10), paddingTop: scale(10) },
+  listContent: { paddingHorizontal: scale(10), paddingTop: scale(10), width: '100%', maxWidth: 640, alignSelf: 'center' },
 
   userItem: {
     flexDirection: 'row',

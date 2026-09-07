@@ -1,10 +1,60 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, Platform, Share, SafeAreaView, StatusBar, Alert, Modal, ScrollView, Pressable, PanResponder } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, Platform, Share, Alert, Modal, ScrollView, Pressable, PanResponder, Image as RNImage } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useVideoPlayer, VideoView, createVideoPlayer } from 'expo-video';
 import { useAuthStore } from '@/src/store/authStore';
+import { DeleteEngine } from '@/src/engines/DeleteEngine';
 import { FollowButton } from '@/src/components/common/FollowButton';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 import { useFollowStatus } from '@/src/hooks/useFollowStatus';
+
+/**
+ * SmartPostImage — dynamically reads real image dimensions so photos
+ * render at their true aspect ratio without cropping or top/bottom cuts.
+ * Clamps ratio between 0.75 (3:4 portrait) and 1.91 (16:9 landscape).
+ */
+function SmartPostImage({ uri, style }: { uri: string; style?: any }) {
+  const [aspectRatio, setAspectRatio] = useState<number>(1);
+
+  useEffect(() => {
+    if (!uri) return;
+    RNImage.getSize(
+      uri,
+      (w, h) => {
+        if (!w || !h) return;
+        const rawRatio = w / h;
+        const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.91);
+        setAspectRatio(clampedRatio);
+      },
+      () => {}
+    );
+  }, [uri]);
+
+  return (
+    <Image
+      source={{ uri }}
+      onLoad={(evt) => {
+        const { width, height } = evt?.source || {};
+        if (width && height) {
+          const rawRatio = width / height;
+          const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.91);
+          setAspectRatio(clampedRatio);
+        }
+      }}
+      style={[
+        style,
+        {
+          width: '100%',
+          aspectRatio: aspectRatio,
+        },
+      ]}
+      contentFit="cover"
+      cachePolicy="disk"
+      transition={200}
+    />
+  );
+}
 
 interface HomeFeedVideoItemProps {
   uri: string;
@@ -45,6 +95,7 @@ const HomeFeedVideoItem = ({ uri, shouldPlay, isMuted, style, onReady, onLoadSta
 
   return (
     <VideoView
+      key={uri}
       player={player}
       style={style}
       contentFit="cover"
@@ -74,7 +125,6 @@ import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { ActiveGhostRoomsModal } from '@/components/profile/ActiveGhostRoomsModal';
 import { PostOptionsModal } from '@/components/PostOptionsModal';
-import { SponsoredPostRow } from '@/components/SponsoredPostRow';
 import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
 import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
 
@@ -180,7 +230,7 @@ const SuggestedUserCard: React.FC<SuggestedUserCardProps> = ({ sugUser, styles, 
 
 export default function HomeScreen() {
   const COLORS = useAppTheme();
-  const styles = getStyles(COLORS);
+  const styles = React.useMemo(() => getStyles(COLORS), [COLORS]);
   const router = useRouter();
   const { user, token } = useAuthStore();
   const isAnonymous = user?.isAnonymousMode;
@@ -281,14 +331,9 @@ export default function HomeScreen() {
 
   React.useEffect(() => {
     const sub = DeviceEventEmitter.addListener('post:deleted:local', (data: { postId: string }) => {
-      setPosts(prev => (prev || []).filter(p => (p._id || p.id) !== data.postId));
-      if (isAnonymous) {
-        const currentAnon = useFeedStore.getState().cachedAnonymousPosts || [];
-        useFeedStore.getState().setCachedAnonymousPosts(currentAnon.filter((p: any) => (p._id || p.id) !== data.postId));
-      } else {
-        const currentNormal = useFeedStore.getState().cachedPosts || [];
-        useFeedStore.getState().setCachedPosts(currentNormal.filter((p: any) => (p._id || p.id) !== data.postId));
-      }
+      const targetId = String(data.postId);
+      setPosts(prev => (prev || []).filter(p => String(p._id || p.id) !== targetId));
+      useFeedStore.getState().deletePostFromCache(targetId);
     });
     const reportSub = DeviceEventEmitter.addListener('post:reported:local', (data: { postId: string }) => {
       setReportedPosts(prev => ({ ...prev, [data.postId]: true }));
@@ -297,7 +342,7 @@ export default function HomeScreen() {
       sub.remove();
       reportSub.remove();
     };
-  }, [isAnonymous]);
+  }, []);
 
   // 🚀 REAL-TIME SYNCHRONIZATION: Listen for real-time posts from followed/other users instantly!
   React.useEffect(() => {
@@ -322,18 +367,35 @@ export default function HomeScreen() {
       });
     };
 
+    const onPostDeletedBroadcast = (payload: { postId: string }) => {
+      if (!payload?.postId) return;
+      const targetId = String(payload.postId);
+      setPosts(prev => (prev || []).filter(p => String(p._id || p.id) !== targetId));
+      useFeedStore.getState().deletePostFromCache(targetId);
+    };
+
     s.on('post:broadcast', onPostCreatedBroadcast);
     s.on('post:created', onPostCreatedBroadcast);
     s.on('post:create', onPostCreatedBroadcast);
+    s.on('post:new', onPostCreatedBroadcast);
+    s.on('post:deleted', onPostDeletedBroadcast);
     return () => {
       s.off('post:broadcast', onPostCreatedBroadcast);
       s.off('post:created', onPostCreatedBroadcast);
       s.off('post:create', onPostCreatedBroadcast);
+      s.off('post:new', onPostCreatedBroadcast);
+      s.off('post:deleted', onPostDeletedBroadcast);
     };
   }, [isAnonymous]);
 
   const isFocused = useIsFocused();
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+  const [musicInfoPost, setMusicInfoPost] = useState<{
+    songName: string;
+    artist: string;
+    coverImage?: string;
+    postId: string;
+  } | null>(null);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
@@ -348,6 +410,104 @@ export default function HomeScreen() {
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 50,
   }).current;
+
+  // Auto-activate first post on mount so sound/video is ready immediately
+  useEffect(() => {
+    if (!activeVideoId && posts && posts.length > 0) {
+      const firstId = posts[0]._id || posts[0].id;
+      if (firstId) setActiveVideoId(String(firstId));
+    }
+  }, [posts, activeVideoId]);
+
+  // ── 🎵 Single Global Feed Audio Controller (Powered by expo-video, 1 instance for active post) ──
+  const feedPlayerRef = useRef<any>(null);
+  const feedAudioReqId = useRef(0);
+
+  const currentActivePost = posts.find(p => String(p._id || p.id) === String(activeVideoId)) || (posts.length > 0 ? posts[0] : null);
+  const activePostMusic = currentActivePost?.music || currentActivePost?.music_info;
+  const activeMusicUrl =
+    activePostMusic?.preview_url ||
+    activePostMusic?.previewUrl ||
+    activePostMusic?.audio_url ||
+    activePostMusic?.url ||
+    currentActivePost?.preview_url ||
+    currentActivePost?.previewUrl;
+  const activeSongName =
+    activePostMusic?.song_name ||
+    activePostMusic?.songTitle ||
+    currentActivePost?.song_name;
+  const activeArtist =
+    activePostMusic?.artist ||
+    activePostMusic?.artist_name ||
+    currentActivePost?.artist;
+
+  const currentFeedAudioUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    feedAudioReqId.current += 1;
+    const reqId = feedAudioReqId.current;
+
+    const cleanupPlayer = () => {
+      if (feedPlayerRef.current) {
+        try {
+          feedPlayerRef.current.pause();
+        } catch (_) {}
+        feedPlayerRef.current = null;
+        currentFeedAudioUrl.current = null;
+      }
+    };
+
+    if (!isFocused || isFeedMuted || (!activeMusicUrl && !activeSongName)) {
+      cleanupPlayer();
+      return;
+    }
+
+    const resolveAndPlay = async () => {
+      let finalUrl = activeMusicUrl;
+      if (!finalUrl && activeSongName) {
+        try {
+          const query = `${activeSongName} ${activeArtist || ''}`.trim();
+          const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=1`);
+          const data = await res.json();
+          if (data?.results?.[0]?.previewUrl) {
+            finalUrl = data.results[0].previewUrl;
+          }
+        } catch (_) {}
+      }
+
+      if (reqId !== feedAudioReqId.current || !finalUrl) {
+        return;
+      }
+
+      if (feedPlayerRef.current && currentFeedAudioUrl.current === finalUrl) {
+        try { feedPlayerRef.current.play(); } catch (_) {}
+        return;
+      }
+
+      cleanupPlayer();
+
+      try {
+        const resolved = resolveMediaUrl(finalUrl);
+        currentFeedAudioUrl.current = finalUrl;
+        const player = createVideoPlayer(resolved);
+        try {
+          (player as any).keepScreenOnWhilePlaying = false;
+        } catch (_) {}
+        player.loop = true;
+        player.muted = false;
+        player.volume = 1.0;
+        feedPlayerRef.current = player;
+        player.play();
+      } catch (err) {}
+    };
+
+    void resolveAndPlay();
+
+    return () => {
+      feedAudioReqId.current += 1;
+      cleanupPlayer();
+    };
+  }, [isFocused, isFeedMuted, activeVideoId, activeMusicUrl, activeSongName, activeArtist]);
 
   const fetchFeedRef = useRef<any>(null);
 
@@ -364,10 +524,9 @@ export default function HomeScreen() {
 
     try {
       if (isRefresh) {
-        const cache = currentMode ? cachedAnonymousPosts : cachedPosts;
-        if (cache.length === 0) {
+        const cache = (currentMode ? useFeedStore.getState().cachedAnonymousPosts : useFeedStore.getState().cachedPosts) || [];
+        if (cache.length === 0 && (!posts || posts.length === 0)) {
           if (!refreshing) setLoading(true);
-          setPosts([]); // Clear posts immediately ONLY if we have no cache
         }
         setPage(1);
         cursorRef.current = null;
@@ -420,11 +579,42 @@ export default function HomeScreen() {
       }
 
       if (isRefresh) {
-        setPosts(mergePostOverrides(newPosts));
+        // 🛡️ PRESERVE LOCAL NEWLY CREATED POSTS: Don't lose local posts created recently
+        const now = Date.now();
+        const localCache = (currentMode ? useFeedStore.getState().cachedAnonymousPosts : useFeedStore.getState().cachedPosts) || [];
+        const recentLocalPosts = localCache.filter((p: any) => {
+          const postTime = new Date(p.createdAt || p.created_at || Date.now()).getTime();
+          const isRecent = (now - postTime) < 180000; // created within last 3 minutes
+          return isRecent;
+        });
+
+        const mergedPosts = newPosts.map((mp: any) => {
+          const mpId = String(mp._id || mp.id);
+          const localMatch = localCache.find((lp: any) => String(lp._id || lp.id) === mpId);
+          if (localMatch) {
+            return {
+              ...localMatch,
+              ...mp,
+              music: mp.music || mp.music_info || localMatch.music || localMatch.music_info,
+              music_info: mp.music || mp.music_info || localMatch.music || localMatch.music_info,
+            };
+          }
+          return mp;
+        });
+
+        recentLocalPosts.forEach((lp: any) => {
+          const lpId = String(lp._id || lp.id);
+          if (!mergedPosts.some((mp: any) => String(mp._id || mp.id) === lpId)) {
+            mergedPosts.unshift(lp);
+          }
+        });
+
+        const finalPosts = mergePostOverrides(mergedPosts);
+        setPosts(finalPosts);
         if (currentMode) {
-          setCachedAnonymousPosts(newPosts);
+          setCachedAnonymousPosts(finalPosts);
         } else {
-          setCachedPosts(newPosts);
+          setCachedPosts(finalPosts);
         }
       } else {
         setPosts(prev => {
@@ -459,7 +649,8 @@ export default function HomeScreen() {
       if (Object.keys(newLikersMap).length > 0) {
         setLikersByPostId((prev) => ({ ...prev, ...newLikersMap }));
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.warn('❌ FETCH FEED ERROR:', error?.message || error, error?.response?.status);
     } finally {
       // Only update loading state if this fetch is still the active one
       if (fetchId === activeFetchId.current) {
@@ -486,31 +677,32 @@ export default function HomeScreen() {
   };
 
   React.useEffect(() => {
-    if (!user) return;
+    const currentToken = useAuthStore.getState().token || token;
+    if (!user || !currentToken) return;
     if (isFirstMount.current) {
       isFirstMount.current = false;
       const cached = isAnonymous ? cachedAnonymousPosts : cachedPosts;
       if (cached.length > 0) {
         setPosts(cached);
         setLoading(false);
-        // Mark as fetched so useFocusEffect skips the duplicate
-        hasFetchedOnMount.current = true;
-        fetchFeedRef.current?.(true, !!isAnonymous);
       } else {
         setLoading(true);
-        hasFetchedOnMount.current = true;
-        fetchFeedRef.current?.(true, !!isAnonymous);
       }
+      hasFetchedOnMount.current = true;
+      fetchFeedRef.current?.(true, !!isAnonymous);
     }
-  }, [user, isAnonymous]);
+  }, [user, token, isAnonymous]);
 
-  // 🚀 SYNC CACHE ON FOCUS: skip first mount (handled by useEffect above)
+  // 🚀 SYNC CACHE ON FOCUS: Always keep feed fresh on screen focus
   useFocusEffect(
     useCallback(() => {
-      // Skip the very first mount to avoid double-fetch with useEffect[user]
-      if (!hasFetchedOnMount.current) return;
+      const currentToken = useAuthStore.getState().token || token;
+      if (!currentToken) return;
 
-      const currentMode = !!activeModeRef.current;
+      // 🛡️ Always sync activeModeRef with current authStore state on screen focus
+      const currentMode = !!useAuthStore.getState().user?.isAnonymousMode;
+      activeModeRef.current = currentMode;
+
       const currentCache = (currentMode ? useFeedStore.getState().cachedAnonymousPosts : useFeedStore.getState().cachedPosts) || [];
       const hasCache = currentCache.length > 0;
       performanceEngine.startScreenTrace('HomeFeed');
@@ -518,40 +710,52 @@ export default function HomeScreen() {
       performanceEngine.endScreenTrace('HomeFeed', hasCache);
 
       if (hasCache) {
-        setPosts(currentCache);
+        setPosts(prev => {
+          if (prev && prev.length > 0) {
+            return prev.map(p => {
+              const cacheMatch = currentCache.find((cp: any) => String(cp._id || cp.id) === String(p._id || p.id));
+              return {
+                ...(cacheMatch || {}),
+                ...p,
+                music: p.music || p.music_info || cacheMatch?.music || cacheMatch?.music_info,
+                music_info: p.music || p.music_info || cacheMatch?.music || cacheMatch?.music_info,
+              };
+            });
+          }
+          return currentCache;
+        });
         setLoading(false);
-        fetchFeedRef.current?.(true, currentMode);
       } else {
         setLoading(true);
-        fetchFeedRef.current?.(true, currentMode);
       }
-    }, [])
+      fetchFeedRef.current?.(true, currentMode);
+    }, [token])
   );
 
   // 🚀 INSTANT TOGGLE: mode_switched = instant cache swap + background refresh
   React.useEffect(() => {
     const sub = DeviceEventEmitter.addListener('mode_switched', ({ isAnonymous: newMode }) => {
       // 🛡️ Update the mode ref FIRST — this invalidates all in-flight fetches from the old mode
-      activeModeRef.current = !!newMode;
+      const isAnon = !!newMode;
+      activeModeRef.current = isAnon;
       // Bump fetchId so any in-flight fetch from the old mode is discarded when it resolves
       activeFetchId.current++;
 
-      const cached = newMode ? cachedAnonymousPosts : cachedPosts;
+      const cached = (isAnon ? useFeedStore.getState().cachedAnonymousPosts : useFeedStore.getState().cachedPosts) || [];
       if (cached.length > 0) {
         setPosts(cached);
         setLoading(false);
       } else {
-        setPosts([]);
         setLoading(true);
       }
       setLikersByPostId({});
       setPage(1);
       setHasMore(true);
       cursorRef.current = null;
-      fetchFeedRef.current?.(true, !!newMode);
+      fetchFeedRef.current?.(true, isAnon);
     });
     return () => sub.remove();
-  }, [cachedPosts, cachedAnonymousPosts]);
+  }, []);
 
   // 🚀 REAL-TIME POST UPDATES - Only from other users
   React.useEffect(() => {
@@ -739,17 +943,6 @@ export default function HomeScreen() {
     }, 400);
   }, [fetchFeed]);
 
-  // 🚀 AUTOMATIC INITIAL MOUNT FETCH: Always fetch feed when token is available or if posts array is empty
-  React.useEffect(() => {
-    const currentToken = useAuthStore.getState().token || token;
-    if (!currentToken) return;
-
-    if (!hasFetchedOnMount.current || posts.length === 0) {
-      hasFetchedOnMount.current = true;
-      cursorRef.current = null;
-      void fetchFeed(true);
-    }
-  }, [token, user]);
 
 
   const handleLike = async (postId: string, isLiked: boolean, reaction?: string) => {
@@ -931,21 +1124,14 @@ export default function HomeScreen() {
     }
   };
   const handleDeletePost = async (postId: string) => {
-    // Optimistic removal
-    setPosts(prev => (prev || []).filter(p => (p._id || p.id) !== postId));
-    // Also remove from cached feed stores to be in sync!
-    if (isAnonymous) {
-      const currentAnon = useFeedStore.getState().cachedAnonymousPosts || [];
-      useFeedStore.getState().setCachedAnonymousPosts(currentAnon.filter((p: any) => (p._id || p.id) !== postId));
-    } else {
-      const currentNormal = useFeedStore.getState().cachedPosts || [];
-      useFeedStore.getState().setCachedPosts(currentNormal.filter((p: any) => (p._id || p.id) !== postId));
-    }
-    DeviceEventEmitter.emit('post:deleted:local', { postId: postId });
+    const targetId = String(postId);
+    // 🚀 Zero-latency atomic purge across all caches
+    DeleteEngine.purgePostFromAllCaches(targetId);
+    setPosts(prev => (prev || []).filter(p => String(p._id || p.id) !== targetId));
+
     try {
-      await apiClient.delete(`/posts/${postId}`);
+      await apiClient.delete(`/posts/${targetId}`);
     } catch (err) {
-      // Refresh to restore state
       fetchFeedRef.current?.(true);
     }
   };
@@ -980,8 +1166,8 @@ export default function HomeScreen() {
   ).current;
 
   return (
-    <SafeAreaView style={styles.container} {...homePanResponder.panHandlers}>
-      <StatusBar barStyle={COLORS.background === '#121212' ? 'light-content' : 'dark-content'} />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar style={COLORS.background === '#121212' ? 'light' : 'dark'} />
 
       <View style={styles.appHeader}>
         <View style={styles.headerLeftContainer}>
@@ -1035,8 +1221,64 @@ export default function HomeScreen() {
                 item.author?.username || item.user?.username
               );
 
+              let parsedMusic = item.music || {};
+              let parsedMusicInfo = item.music_info || {};
+              if (typeof parsedMusic === 'string') {
+                try { parsedMusic = JSON.parse(parsedMusic); } catch (_) { }
+              }
+              if (typeof parsedMusicInfo === 'string') {
+                try { parsedMusicInfo = JSON.parse(parsedMusicInfo); } catch (_) { }
+              }
+
+              const songName =
+                parsedMusic?.song_name ||
+                parsedMusicInfo?.song_name ||
+                parsedMusic?.songTitle ||
+                parsedMusicInfo?.songTitle ||
+                parsedMusic?.name ||
+                parsedMusicInfo?.name ||
+                item.song_name ||
+                item.songTitle ||
+                item.music_title;
+
+              const songArtist =
+                parsedMusic?.artist ||
+                parsedMusicInfo?.artist ||
+                parsedMusic?.artist_name ||
+                parsedMusicInfo?.artist_name ||
+                parsedMusic?.singer ||
+                parsedMusicInfo?.singer ||
+                item.artist ||
+                item.singer;
+
+              const postAudioUrl =
+                parsedMusic?.preview_url ||
+                parsedMusicInfo?.preview_url ||
+                parsedMusic?.previewUrl ||
+                parsedMusicInfo?.previewUrl ||
+                parsedMusic?.audio_url ||
+                parsedMusicInfo?.audio_url ||
+                parsedMusic?.audioUrl ||
+                parsedMusicInfo?.audioUrl ||
+                parsedMusic?.url ||
+                parsedMusicInfo?.url ||
+                parsedMusic?.uri ||
+                parsedMusicInfo?.uri ||
+                item.preview_url ||
+                item.previewUrl ||
+                item.music_url ||
+                item.audio_url ||
+                item.audioUrl;
+
+              const hasMusicMetadata = !!(
+                songName ||
+                songArtist ||
+                postAudioUrl
+              );
+
+              const isThisPostActive = isFocused && (activeVideoId === String(postId) || (!activeVideoId && index === 0));
+
               const shouldShowSuggestion = !isAnonymous && index > 0 && (index + 1) % 6 === 0 && suggestedUsers.length > 0;
-              const shouldShowAd = !isAnonymous && index > 0 && (index + 1) % 3 === 0;
               const suggestionIndex = Math.floor((index + 1) / 6) - 1;
               const suggestionUser = suggestedUsers[suggestionIndex % suggestedUsers.length];
 
@@ -1065,7 +1307,10 @@ export default function HomeScreen() {
                       <TouchableOpacity
                         style={{ flexDirection: 'column', alignItems: 'flex-start', gap: verticalScale(2) }}
                         disabled={isAnonymous && !isOwn}
-                        onPress={() => router.push(`/user/${item.author?.username || item.user?.username}`)}
+                        onPress={() => {
+                          const uname = item.author?.username || item.user?.username;
+                          if (uname) router.push(`/user/${uname}`);
+                        }}
                       >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Image
@@ -1091,7 +1336,6 @@ export default function HomeScreen() {
 
                         <View style={{ marginTop: verticalScale(2) }}>
                           {item.location?.name && <Text style={styles.postLocation}>{item.location.name}</Text>}
-
                         </View>
                       </TouchableOpacity>
 
@@ -1185,13 +1429,12 @@ export default function HomeScreen() {
                         if (!resolvedMedia) return null;
 
                         if (isVideo) {
-                          const isVideoActive = isFocused && activeVideoId === String(postId);
                           return (
                             <View style={styles.postImage}>
                               <HomeFeedVideoItem
                                 uri={resolvedMedia}
-                                shouldPlay={isVideoActive}
-                                isMuted={isFeedMuted || !isVideoActive}
+                                shouldPlay={isThisPostActive}
+                                isMuted={(postAudioUrl || hasMusicMetadata) ? true : (isFeedMuted || !isThisPostActive)}
                                 style={StyleSheet.absoluteFill}
                                 onReady={() => {
                                   setReadyVideos(prev => ({ ...prev, [postId]: true }));
@@ -1202,7 +1445,7 @@ export default function HomeScreen() {
                               />
 
                               {/* High-performance cached poster overlay */}
-                              {(!readyVideos[postId] || !isVideoActive) && (
+                              {(!readyVideos[postId] || !isThisPostActive) && (
                                 <Image
                                   source={{ uri: resolvedThumb }}
                                   style={StyleSheet.absoluteFill}
@@ -1215,31 +1458,33 @@ export default function HomeScreen() {
                           );
                         } else {
                           return (
-                            <Image
-                              source={{ uri: resolvedMedia }}
+                            <SmartPostImage
+                              uri={resolvedMedia}
                               style={styles.postImage}
-                              contentFit="cover"
-                              cachePolicy="disk"
-                              transition={200}
                             />
                           );
                         }
                       })()}
 
-                      {/* Global Mute Toggle Speaker Icon */}
-                      {item.media_type === 'video' && (
+                      {/* Global Mute / Music Toggle Button (Like Instagram) */}
+                      {(item.media_type === 'video' || !!postAudioUrl || hasMusicMetadata) && (
                         <TouchableOpacity
                           style={styles.globalMuteButton}
                           onPress={(e) => {
                             e.stopPropagation();
                             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setIsFeedMuted(!isFeedMuted);
+                            if (activeVideoId !== String(postId)) {
+                              setActiveVideoId(String(postId));
+                              setIsFeedMuted(false);
+                            } else {
+                              setIsFeedMuted(prev => !prev);
+                            }
                           }}
                           activeOpacity={0.7}
                         >
                           <Ionicons
-                            name={isFeedMuted ? "volume-mute" : "volume-high"}
-                            size={18}
+                            name={(isFeedMuted || !isThisPostActive) ? "volume-mute" : (postAudioUrl || hasMusicMetadata ? "musical-notes" : "volume-high")}
+                            size={16}
                             color="#FFF"
                           />
                         </TouchableOpacity>
@@ -1344,27 +1589,41 @@ export default function HomeScreen() {
 
                       {/* 🎵 Music Album Cover / Square Box Thumbnail on Right Corner */}
                       {(() => {
-                        const music = item.music || {};
-                        const musicInfo = item.music_info || {};
-                        const hasMusicMetadata = !!(music.song_name || musicInfo.song_name);
-
                         if (!hasMusicMetadata) return null;
 
-                        const coverImage = music.cover_image || musicInfo.cover_image || music.cover_url || musicInfo.cover_url || (item as any).music_cover;
+                        const coverImage = parsedMusic?.cover_image || parsedMusicInfo?.cover_image || parsedMusic?.cover_url || parsedMusicInfo?.cover_url || (item as any).music_cover;
                         const avatarUrl = item.author?.avatar_url || item.author?.avatar || item.user?.avatar_url || item.user?.avatar;
                         const finalUrl = coverImage || avatarUrl;
 
                         return (
-                          <View style={styles.musicSquareBox}>
+                          <TouchableOpacity
+                            style={styles.musicSquareBox}
+                            onPress={() => {
+                              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (activeVideoId !== String(postId)) {
+                                setActiveVideoId(String(postId));
+                                setIsFeedMuted(false);
+                              } else if (isFeedMuted) {
+                                setIsFeedMuted(false);
+                              }
+                              setMusicInfoPost({
+                                songName: songName || 'Original Audio',
+                                artist: songArtist || displayUsername || 'AnuFy Creator',
+                                coverImage: finalUrl,
+                                postId: String(postId),
+                              });
+                            }}
+                            activeOpacity={0.8}
+                          >
                             <Image
                               source={{ uri: resolveMediaUrl(finalUrl) }}
                               style={styles.musicSquareImage}
                               contentFit="cover"
                             />
-                            <View style={styles.musicSquareBadge}>
-                              <Ionicons name="musical-notes" size={9} color="#FFFFFF" />
+                            <View style={[styles.musicSquareBadge, { backgroundColor: (isFeedMuted || !isThisPostActive) ? 'rgba(0,0,0,0.7)' : '#9333EA' }]}>
+                              <Ionicons name={(isFeedMuted || !isThisPostActive) ? "volume-mute" : "musical-notes"} size={9} color="#FFFFFF" />
                             </View>
-                          </View>
+                          </TouchableOpacity>
                         );
                       })()}
                     </View>{/* end actionRowContainer */}
@@ -1557,7 +1816,6 @@ export default function HomeScreen() {
                       />
                     </View>
                   )}
-                  {shouldShowAd && <SponsoredPostRow />}
                 </View>
               );
             }}
@@ -1761,6 +2019,124 @@ export default function HomeScreen() {
         isVisible={isGhostRoomsModalVisible}
         onClose={() => setIsGhostRoomsModalVisible(false)}
       />
+
+      {/* 🎵 Instagram-style Music Details Bottom Sheet Modal */}
+      <Modal
+        visible={!!musicInfoPost}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMusicInfoPost(null)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}
+          onPress={() => setMusicInfoPost(null)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: '#18181B',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              paddingHorizontal: 20,
+              paddingTop: 12,
+              paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+              borderTopWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Grab Handle */}
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', alignSelf: 'center', marginBottom: 18 }} />
+
+            {/* Song Cover & Details */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <Image
+                source={{ uri: resolveMediaUrl(musicInfoPost?.coverImage) }}
+                style={{ width: 68, height: 68, borderRadius: 12, backgroundColor: '#27272A' }}
+                contentFit="cover"
+              />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Ionicons name="musical-notes" size={16} color="#A855F7" />
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#FFFFFF' }} numberOfLines={1}>
+                    {musicInfoPost?.songName || 'Original Audio'}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 13, color: '#A1A1AA', fontWeight: '500' }} numberOfLines={1}>
+                  {musicInfoPost?.artist || 'Unknown Artist'}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isFeedMuted ? '#EF4444' : '#22C55E' }} />
+                  <Text style={{ fontSize: 11, color: isFeedMuted ? '#F87171' : '#4ADE80', fontWeight: '600' }}>
+                    {isFeedMuted ? 'Muted' : 'Playing Now'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Play / Mute Toggle Button in Modal */}
+              <TouchableOpacity
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: '#27272A',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.15)',
+                }}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setIsFeedMuted(prev => !prev);
+                }}
+              >
+                <Ionicons
+                  name={isFeedMuted ? "volume-mute" : "musical-notes"}
+                  size={20}
+                  color={isFeedMuted ? '#FFF' : '#A855F7'}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  height: 44,
+                  borderRadius: 12,
+                  backgroundColor: '#9333EA',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  const sName = musicInfoPost?.songName || '';
+                  const sArt = musicInfoPost?.artist || '';
+                  setMusicInfoPost(null);
+                  router.push(`/post-editor?songName=${encodeURIComponent(sName)}&artist=${encodeURIComponent(sArt)}`);
+                }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Use this Audio</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  height: 44,
+                  paddingHorizontal: 18,
+                  borderRadius: 12,
+                  backgroundColor: '#27272A',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => setMusicInfoPost(null)}
+              >
+                <Text style={{ color: '#A1A1AA', fontWeight: '600', fontSize: 14 }}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <PerformanceOverlay />
     </SafeAreaView>
   );
@@ -1768,11 +2144,18 @@ export default function HomeScreen() {
 const getStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   appHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: scale(16),
-    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(45),
-    paddingBottom: verticalScale(14),
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: moderateScale(16),
+    paddingTop: verticalScale(6),
+    paddingBottom: verticalScale(10),
     backgroundColor: COLORS.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1796,29 +2179,37 @@ const getStyles = (COLORS: any) => StyleSheet.create({
     fontWeight: 'bold',
   },
   headerLeftContainer: {
-    width: scale(140),
-    height: verticalScale(42),
+    width: moderateScale(130),
+    height: moderateScale(38),
     justifyContent: 'center',
     alignItems: 'flex-start',
+    overflow: 'hidden',
   },
   headerLogo: {
-    width: '100%',
-    height: '100%',
+    width: moderateScale(130),
+    height: moderateScale(38),
     transform: [
-      { scale: 2.2 },
-      { translateX: scale(-20) }
+      { scale: 2.1 },
+      { translateX: moderateScale(-14) }
     ],
   },
-  headerIcons: { flexDirection: 'row', gap: scale(18) },
-  iconBtn: { position: 'relative' },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: moderateScale(16),
+  },
+  iconBtn: {
+    position: 'relative',
+    padding: moderateScale(4),
+  },
   headerBadge: {
     position: 'absolute',
-    top: -1,
-    right: -1,
+    top: 2,
+    right: 2,
     backgroundColor: '#FF3B30',
-    width: scale(8),
-    height: scale(8),
-    borderRadius: scale(4),
+    width: moderateScale(8),
+    height: moderateScale(8),
+    borderRadius: moderateScale(4),
     borderWidth: 1,
     borderColor: COLORS.background,
   },
@@ -1828,7 +2219,9 @@ const getStyles = (COLORS: any) => StyleSheet.create({
     marginTop: verticalScale(0),
     borderWidth: 0,
     borderRadius: 0,
-    marginHorizontal: 0,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
     overflow: 'hidden',
     paddingBottom: 0,
   },
@@ -1871,8 +2264,8 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   },
 
   postImage: {
-    width: SIZES.width,
-    height: SIZES.width * 1.25,
+    width: '100%',
+    maxHeight: 560,
     backgroundColor: COLORS.surface,
     alignSelf: 'center',
     marginTop: 0,
@@ -1886,6 +2279,9 @@ const getStyles = (COLORS: any) => StyleSheet.create({
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: COLORS.border,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   suggestionTitle: {
     fontSize: moderateFont(14),

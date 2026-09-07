@@ -34,7 +34,6 @@ import * as Haptics from 'expo-haptics';
 import { ShareModal } from '@/components/ShareModal';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 import { useFollowStatus } from '@/src/hooks/useFollowStatus';
-import { SponsoredShotItem } from '@/components/SponsoredShotItem';
 import { ALL_EMOJIS } from '@/src/constants/all-emojis';
 
 const { width, height } = Dimensions.get('window');
@@ -63,6 +62,10 @@ interface ShotItem {
   videoUrl?: string;
   video_url?: string;
   content_url?: string;
+  media_urls?: string[];
+  media?: Array<{ url: string }>;
+  url?: string;
+  video?: string;
   thumbnail_url?: string;
   thumbnail?: string;
   isLiked?: boolean;
@@ -126,7 +129,7 @@ const EMOJI_CATEGORIES = [
   { id: 'recent', label: 'Recent', emojis: ['👍', '❤️', '😂', '🔥', '💀', '🤩', '✨', '😎', '🤓', '😇', '🤑', '😢'] }
 ];
 
-const groupedEmojis = ALL_EMOJIS.reduce((acc, item) => {
+const groupedEmojis = (ALL_EMOJIS || []).reduce((acc, item) => {
   if (!acc[item.category]) {
     acc[item.category] = [];
   }
@@ -183,60 +186,56 @@ const ReelVideoPlayer = React.memo(({
   setIsVideoReady,
   setIsBuffering
 }: ReelVideoPlayerProps) => {
-  const player = useVideoPlayer(videoSource, p => {
+  const player = useVideoPlayer(videoSource || '', p => {
     p.loop = true;
     p.muted = isMuted;
     p.timeUpdateEventInterval = 0.5;
   });
+
+  const { status } = useEvent(player, 'statusChange', { status: player.status });
+  const { isPlaying: isPlayerPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
   useEffect(() => {
     player.muted = isMuted;
   }, [isMuted, player]);
 
   useEffect(() => {
-    if (player.status === 'readyToPlay') {
+    if (status === 'readyToPlay' || isPlayerPlaying || player.status === 'readyToPlay' || player.playing) {
+      setIsBuffering(false);
+      setIsVideoReady(true);
+    } else if (status === 'loading' || player.status === 'loading') {
+      setIsBuffering(true);
+    } else if (status === 'error' || player.status === 'error') {
       setIsBuffering(false);
       setIsVideoReady(true);
     }
-
-    const statusSub = player.addListener('statusChange', ({ status }) => {
-      if (status === 'loading') {
-        setIsBuffering(true);
-        setIsVideoReady(false);
-      } else if (status === 'readyToPlay') {
-        setIsBuffering(false);
-        setIsVideoReady(true);
-      } else if (status === 'error') {
-        setIsBuffering(false);
-      }
-    });
-
-    return () => {
-      statusSub.remove();
-    };
-  }, [player]);
+  }, [status, isPlayerPlaying, player.status, player.playing, setIsBuffering, setIsVideoReady]);
 
   useEffect(() => {
-    if (isVisible && isFocused && isPlaying) {
-      // Video is visible — play instantly (already reset to 0 when we last left)
-      player.play();
+    if (isVisible && isFocused && isPlaying && videoSource) {
+      try {
+        player.play();
+        setIsVideoReady(true);
+      } catch (_) {}
       const shotId = item._id || item.id;
       if (shotId) {
         socketService.socket?.emit('shot:view', { shotId: String(shotId) });
       }
     } else {
-      // Video goes hidden — pause AND silently reset to 0
-      // User doesn't see this seek, so next visit starts fresh with zero stutter
-      player.pause();
-      try { player.currentTime = 0; } catch (_) { }
+      try {
+        player.pause();
+      } catch (_) {}
     }
-  }, [isVisible, isFocused, isPlaying, player, item._id, item.id]);
+  }, [isVisible, isFocused, isPlaying, player, videoSource, item._id, item.id, setIsVideoReady]);
+
+  if (!videoSource) return null;
 
   return (
     <VideoView
+      key={videoSource}
       player={player}
       style={StyleSheet.absoluteFill}
-      contentFit="contain"
+      contentFit="cover"
       nativeControls={false}
     />
   );
@@ -384,50 +383,38 @@ const ReelItem = React.memo(({ item, isVisible, shouldRenderVideo = true, isFocu
 
   // 🚀 Optimize Video Source for Lightning Speed (Forces hardware-accelerated H.264 MP4 format with width limit to prevent stuttering/lagging)
   const videoSource = useMemo(() => {
-    let url = item.videoUrl || item.video_url || item.content_url || '';
-    if (!url) return 'https://assets.mixkit.co/videos/preview/mixkit-spinning-around-the-earth-in-space-4034-large.mp4';
+    let url = item.videoUrl ||
+      item.video_url ||
+      item.content_url ||
+      (item as any).url ||
+      (item as any).video ||
+      (item.media_urls && item.media_urls[0]) ||
+      (item.media && item.media[0]?.url) ||
+      (item.media && typeof item.media[0] === 'string' ? item.media[0] : '') || '';
 
-    if (url.includes('cloudinary.com')) {
-      const uploadIndex = url.indexOf('/upload/');
-      if (uploadIndex !== -1) {
-        const beforeUpload = url.substring(0, uploadIndex + 8);
-        const afterUpload = url.substring(uploadIndex + 8);
-        const versionMatch = afterUpload.match(/v\d+\//);
-        if (versionMatch && versionMatch.index !== undefined) {
-          const versionPart = afterUpload.substring(versionMatch.index);
-          url = `${beforeUpload}f_mp4,q_auto,vc_h264,w_720,c_limit/${versionPart}`;
-        } else {
-          url = url.replace('/upload/', '/upload/f_mp4,q_auto,vc_h264,w_720,c_limit/');
-        }
-      }
-    }
+    if (!url) return '';
     return resolveMediaUrl(url);
-  }, [item.videoUrl, item.video_url, item.content_url]);
+  }, [item.videoUrl, item.video_url, item.content_url, item.media_urls, item.media, (item as any).url, (item as any).video]);
 
   // 🚀 Resolve Poster Source with Auto-Generated Cloudinary fallback for newly created shots
   const resolvedPosterSource = useMemo(() => {
     const thumb = item.thumbnail_url || item.thumbnail || (item as any).thumbnailUrl;
     if (thumb) return resolveMediaUrl(thumb);
 
-    const videoUrl = item.videoUrl || item.video_url || item.content_url || '';
+    const videoUrl = item.videoUrl ||
+      item.video_url ||
+      item.content_url ||
+      (item as any).url ||
+      (item as any).video ||
+      (item.media_urls && item.media_urls[0]) ||
+      (item.media && item.media[0]?.url) || '';
+
     if (videoUrl && videoUrl.includes('cloudinary.com')) {
       let thumbUrl = videoUrl.replace(/\.[^/.]+$/, '.jpg');
-      const uploadIndex = thumbUrl.indexOf('/upload/');
-      if (uploadIndex !== -1) {
-        const beforeUpload = thumbUrl.substring(0, uploadIndex + 8);
-        const afterUpload = thumbUrl.substring(uploadIndex + 8);
-        const versionMatch = afterUpload.match(/v\d+\//);
-        if (versionMatch && versionMatch.index !== undefined) {
-          const versionPart = afterUpload.substring(versionMatch.index);
-          thumbUrl = `${beforeUpload}f_auto,q_auto,w_720,so_0,c_limit/${versionPart}`;
-        } else {
-          thumbUrl = thumbUrl.replace('/upload/', '/upload/f_auto,q_auto,w_720,so_0,c_limit/');
-        }
-      }
       return resolveMediaUrl(thumbUrl);
     }
     return '';
-  }, [item.thumbnail_url, item.thumbnail, (item as any).thumbnailUrl, item.videoUrl, item.video_url, item.content_url]);
+  }, [item.thumbnail_url, item.thumbnail, (item as any).thumbnailUrl, item.videoUrl, item.video_url, item.content_url, item.media_urls, item.media, (item as any).url, (item as any).video]);
 
   useEffect(() => {
     if (isEditingMode) {
@@ -812,11 +799,11 @@ const ReelItem = React.memo(({ item, isVisible, shouldRenderVideo = true, isFocu
           )}
 
           {/* Zero-black-screen high-performance cached poster overlay */}
-          {(!isVideoReady || !isVisible) && resolvedPosterSource ? (
+          {!isVideoReady && resolvedPosterSource ? (
             <Image
               source={{ uri: resolvedPosterSource }}
               style={StyleSheet.absoluteFill}
-              contentFit="contain"
+              contentFit="cover"
               cachePolicy="disk"
               transition={150}
             />
@@ -1493,24 +1480,7 @@ export default function ShotsScreen() {
   }, []);
 
   const injectAds = useCallback((data: ShotItem[]): ShotItem[] => {
-    if (data.length === 0) return data;
-    const result: ShotItem[] = [];
-    data.forEach((item, index) => {
-      result.push(item);
-      if (index > 0 && (index + 1) % AD_INTERVAL === 0) {
-        result.push({
-          id: `ad_${item._id || item.id}_${index}`,
-          _id: `ad_${item._id || item.id}_${index}`,
-          isAd: true,
-          is_ad: true,
-          title: 'Sponsored Ad',
-          caption: 'Tired of ads? Get AnuFy Premium for an ad-free experience, custom themes, and badges! 🚀',
-          cta_text: 'Learn More',
-          cta_url: 'https://anufy.app/premium'
-        } as ShotItem);
-      }
-    });
-    return result;
+    return data;
   }, []);
 
   // 🚀 INSTANT LOADING: Preload next batch in background
@@ -1817,9 +1787,9 @@ export default function ShotsScreen() {
           activeOpacity={0.7}
           hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
           style={{ position: 'absolute', right: 12, zIndex: 200, padding: 5 }}
-          onPress={() => router.push('/post-editor')}
+          onPress={() => router.push('/create')}
         >
-          <Ionicons name="add" size={28} color="#FFF" />
+          <Ionicons name="camera-outline" size={26} color="#FFF" />
         </TouchableOpacity>
       </View>
 
@@ -1883,10 +1853,7 @@ export default function ShotsScreen() {
             />
           }
           renderItem={({ item, index }) => {
-            if (!item) return null;
-            if (item.isAd || item.is_ad) {
-              return <SponsoredShotItem ad={item as any} />;
-            }
+            if (!item || item.isAd || item.is_ad) return null;
             const isPreloadTarget = Math.abs(index - visibleIndex) <= 2;
             return (
               <ReelItem

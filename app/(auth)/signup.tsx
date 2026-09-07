@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView, SafeAreaView, Image, FlatList, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView, Image, FlatList, Modal } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { apiClient } from '@/src/api/client';
 import { useAuthStore } from '@/src/store/authStore';
@@ -442,9 +443,9 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   flex: { flex: 1 },
-  scrollContent: { padding: 24, justifyContent: 'center', minHeight: '100%' },
-  headerContainer: { marginBottom: 30, alignItems: 'center', marginTop: 20 },
-  logoTextTitle: { width: scale(300), height: verticalScale(120), marginBottom: -15 },
+  scrollContent: { padding: 24, justifyContent: 'center', minHeight: '100%', width: '100%', maxWidth: 540, alignSelf: 'center' },
+  headerContainer: { marginBottom: 24, alignItems: 'center', marginTop: 16 },
+  logoTextTitle: { width: Math.min(scale(280), 280), height: Math.min(verticalScale(110), 110), maxWidth: '90%', marginBottom: -10 },
   subtitle: { fontSize: 15, color: COLORS.subtitle, marginTop: -10, textAlign: 'center', lineHeight: 22 },
   formContainer: { width: '100%' },
   errorText: { color: COLORS.error, marginBottom: 16, textAlign: 'center', fontWeight: '600' },

@@ -5,10 +5,11 @@ type ChatMessageLike = {
   message_type?: string;
   status?: string;
   sender_id?: { _id?: string } | string;
-  created_at?: string;
+  created_at?: string | Date;
   reactions?: Record<string, any>;
   tempMessageId?: string;
   client_message_id?: string;
+  [key: string]: any;
 };
 
 export function messageId(m: ChatMessageLike): string {
@@ -42,19 +43,36 @@ export function getTime(m: ChatMessageLike): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-/** Sort messages ascending: oldest first → newest at the END (bottom of non-inverted list) */
-export function sortMessagesDesc<T extends ChatMessageLike>(msgs: T[]): T[] {
+/** Single Canonical Message Sorter: Oldest first (index 0 = oldest, top) → Newest last (index N-1 = newest, bottom) */
+export function sortMessagesOldestFirst<T extends ChatMessageLike>(msgs: T[]): T[] {
   return [...msgs].sort((a, b) => {
     const aTime = getTime(a);
     const bTime = getTime(b);
     if (aTime !== bTime) {
-      return aTime - bTime; // Oldest first → newest at END → appears at BOTTOM
+      return aTime - bTime; // Oldest first (index 0) → newest last (index N-1)
     }
     return messageId(a).localeCompare(messageId(b));
   });
 }
 
-/** Keep in-flight optimistic sends while refreshing history from API. */
+/** Backwards-compatible aliases mapping to canonical oldest-first sorter */
+export function sortMessagesAscending<T extends ChatMessageLike>(msgs: T[]): T[] {
+  return sortMessagesOldestFirst(msgs);
+}
+
+export function sortMessagesNewestFirst<T extends ChatMessageLike>(msgs: T[]): T[] {
+  return sortMessagesOldestFirst(msgs);
+}
+
+export function sortMessagesDesc<T extends ChatMessageLike>(msgs: T[]): T[] {
+  return sortMessagesOldestFirst(msgs);
+}
+
+export function sortMessagesInverted<T extends ChatMessageLike>(msgs: T[]): T[] {
+  return sortMessagesOldestFirst(msgs);
+}
+
+/** Keep in-flight optimistic sends while refreshing history from API. Returns OLDEST-FIRST array. */
 export function mergeMessageHistory<T extends ChatMessageLike>(
   local: T[],
   remote: T[]
@@ -101,7 +119,34 @@ export function mergeMessageHistory<T extends ChatMessageLike>(
     return m;
   });
 
-  return sortMessagesDesc(dedupeMessages([...keepLocal, ...mergedRemote]));
+  const result = sortMessagesOldestFirst(dedupeMessages([...keepLocal, ...mergedRemote]));
+
+  // 🚀 OPTIMIZATION: Reference equality check to return original array if nothing changed.
+  // Returning the exact same array reference prevents React & FlashList from re-rendering!
+  if (local.length === result.length) {
+    let isIdentical = true;
+    for (let i = 0; i < local.length; i++) {
+      const loc = local[i];
+      const res = result[i];
+      const locAny = loc as any;
+      const resAny = res as any;
+      if (
+        messageId(loc) !== messageId(res) ||
+        loc.status !== res.status ||
+        loc.content !== res.content ||
+        locAny.media_url !== resAny.media_url ||
+        JSON.stringify(loc.reactions || {}) !== JSON.stringify(res.reactions || {})
+      ) {
+        isIdentical = false;
+        break;
+      }
+    }
+    if (isIdentical) {
+      return local;
+    }
+  }
+
+  return result;
 }
 
 export function upsertIncomingMessage<T extends ChatMessageLike>(
@@ -124,7 +169,7 @@ export function upsertIncomingMessage<T extends ChatMessageLike>(
         id: incomingId || existing.id,
         tempMessageId: undefined
       } as T;
-      return sortMessagesDesc(dedupeMessages(next));
+      return sortMessagesOldestFirst(dedupeMessages(next));
     }
   }
 
@@ -136,7 +181,7 @@ export function upsertIncomingMessage<T extends ChatMessageLike>(
       ...next[existingIdx],
       ...incoming
     } as T;
-    return sortMessagesDesc(dedupeMessages(next));
+    return sortMessagesOldestFirst(dedupeMessages(next));
   }
 
   const mySenderId = myId?.toString?.() || myId;
@@ -148,8 +193,8 @@ export function upsertIncomingMessage<T extends ChatMessageLike>(
       if (m.status !== 'sending') return true;
       return messageFingerprint(m) !== incomingPrint;
     });
-    return sortMessagesDesc(dedupeMessages([incoming, ...withoutStale]));
+    return sortMessagesOldestFirst(dedupeMessages([...withoutStale, incoming]));
   }
 
-  return sortMessagesDesc(dedupeMessages([incoming, ...prev]));
+  return sortMessagesOldestFirst(dedupeMessages([...prev, incoming]));
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { apiClient } from '@/src/api/client';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -190,7 +191,7 @@ import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   flex: { flex: 1 },
-  content: { flex: 1, justifyContent: 'center', padding: 24 },
+  content: { flex: 1, justifyContent: 'center', padding: 24, width: '100%', maxWidth: 540, alignSelf: 'center' },
   backBtn: { position: 'absolute', top: 40, left: 24, padding: 8 },
   headerContainer: { marginBottom: 40, alignItems: 'center' },
   title: { fontSize: 28, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, marginBottom: 8 },

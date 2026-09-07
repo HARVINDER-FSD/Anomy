@@ -1,4 +1,4 @@
-﻿import { io, Socket } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { getBaseUrl } from '../api/config';
 
 class SocketService {
@@ -38,6 +38,15 @@ class SocketService {
 
     this.socket.on('connect', () => {
       this._flushPendingRooms();
+    });
+
+    this.socket.on('post:deleted', (data: { postId: string }) => {
+      if (data?.postId) {
+        try {
+          const { DeleteEngine } = require('../engines/DeleteEngine');
+          DeleteEngine.purgePostFromAllCaches(data.postId);
+        } catch (_) {}
+      }
     });
 
     this.socket.on('connect_error', (_error) => {
@@ -89,6 +98,7 @@ class SocketService {
     mediaUrl?: string;
     authorUsername?: string;
     authorAvatar?: string;
+    postCaption?: string;
     attachments?: Array<{ url: string; type: 'image' | 'video' | 'audio' | 'file' }>;
     replyTo?: string;
     tempMessageId?: string;

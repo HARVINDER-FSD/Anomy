@@ -1,9 +1,10 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  SafeAreaView, Platform, Switch, Alert, ActivityIndicator, 
+  Platform, Switch, Alert, ActivityIndicator, 
   StatusBar 
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useAuthStore } from '@/src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
@@ -140,13 +141,14 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { 
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    paddingHorizontal: 20, paddingVertical: verticalScale(14), backgroundColor: COLORS.background,
+    paddingHorizontal: 20, paddingVertical: verticalScale(10), backgroundColor: COLORS.background,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(55)
+    paddingTop: verticalScale(6),
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   headerTitle: { fontSize: 18, fontFamily: 'Outfit_500Medium', color: COLORS.text },
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, width: '100%', maxWidth: 640, alignSelf: 'center' },
   
   personaCard: {
     backgroundColor: COLORS.surface,

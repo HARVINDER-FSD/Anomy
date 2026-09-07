@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -31,6 +31,7 @@ interface FeedStore {
   setCachedPosts: (posts: any[] | ((prev: any[]) => any[])) => void;
   cachedAnonymousPosts: any[];
   setCachedAnonymousPosts: (posts: any[] | ((prev: any[]) => any[])) => void;
+  deletePostFromCache: (postId: string) => void;
   clearAllFeedCaches: () => void;
 }
 
@@ -45,6 +46,13 @@ export const useFeedStore = create<FeedStore>()(
       setCachedAnonymousPosts: (posts) => set({ 
         cachedAnonymousPosts: typeof posts === 'function' ? posts(get().cachedAnonymousPosts || []) : posts 
       }),
+      deletePostFromCache: (postId: string) => {
+        const targetId = String(postId);
+        set((state) => ({
+          cachedPosts: (state.cachedPosts || []).filter((p) => String(p._id || p.id) !== targetId),
+          cachedAnonymousPosts: (state.cachedAnonymousPosts || []).filter((p) => String(p._id || p.id) !== targetId),
+        }));
+      },
       clearAllFeedCaches: () => set({ cachedPosts: [], cachedAnonymousPosts: [] }),
     }),
     {

@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, RefreshControl, Platform, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, RefreshControl, Platform, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
@@ -134,13 +135,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.white },
   header: { 
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(45) : verticalScale(40)
+    paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingTop: verticalScale(6),
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   backBtn: { marginRight: 15 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text },
   headerSub: { fontSize: 12, color: COLORS.subtitle, marginTop: 2 },
-  listContent: { paddingVertical: 10 },
+  listContent: { paddingVertical: 10, width: '100%', maxWidth: 640, alignSelf: 'center' },
   requestItem: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 0.5, borderBottomColor: COLORS.border + '50' },
   avatar: { width: 56, height: 56, borderRadius: 28, marginRight: 15, borderWidth: 1, borderColor: COLORS.border },
   info: { flex: 1 },

@@ -1,0 +1,11 @@
+diff --git a/node_modules/react-native-compressor/android/CMakeLists.txt b/node_modules/react-native-compressor/android/CMakeLists.txt
+index 1234567..abcdefg 100644
+--- a/node_modules/react-native-compressor/android/CMakeLists.txt
++++ b/node_modules/react-native-compressor/android/CMakeLists.txt
+@@ -24,5 +24,6 @@
+         ${PACKAGE_NAME}
+         ${LOG_LIB}
+         android
++        c++_shared
+ )
+ 

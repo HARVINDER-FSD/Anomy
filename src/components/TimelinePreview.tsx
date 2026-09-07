@@ -1,6 +1,5 @@
-﻿import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, StyleSheet, Dimensions, Text, Image, TouchableOpacity, PanResponder, Animated } from 'react-native';
-import { Audio } from 'expo-av';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useEditorStore, EditorLayer } from '../store/editorStore';
@@ -18,8 +17,6 @@ export const TimelinePreview: React.FC = () => {
     layers, currentTime, isPlaying, totalDuration, 
     setCurrentTime, setPlaying, selectedLayerId, removeLayer, clips, activeFilter, activeMusic, isMuted 
   } = useEditorStore();
-  
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
 
   // Calculate which clip is currently active based on currentTime
   const activeClip = clips.find(c => 

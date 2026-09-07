@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Image, Dimensions, TouchableOpacity,
-  SafeAreaView, StatusBar, ActivityIndicator, Animated,
+  StatusBar, ActivityIndicator, Animated,
   KeyboardAvoidingView, Platform, TextInput, Alert, Modal, FlatList, GestureResponderEvent
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +12,6 @@ import { COLORS } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
 import { moderateFont, scale, verticalScale } from '@/src/utils/responsive';
-import { Audio } from 'expo-av';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEvent } from 'expo';
 import Svg, { Path, G as SvgGroup } from 'react-native-svg';

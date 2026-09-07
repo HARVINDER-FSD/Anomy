@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -127,6 +127,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
               mediaUrl: resolvedMediaUrl,
               authorUsername,
               authorAvatar: resolvedAvatar,
+              postCaption: postContent || '',
               tempMessageId: `share_${Date.now()}_${recipientId}`
             });
           } else {
@@ -136,6 +137,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isVisible, onClose, post
               media_url: resolvedMediaUrl,
               author_username: authorUsername,
               author_avatar: resolvedAvatar,
+              post_caption: postContent || '',
             });
           }
         } catch (err) {

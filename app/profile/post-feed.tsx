@@ -1,8 +1,20 @@
-﻿import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, RefreshControl, Image, TouchableOpacity, Platform, SafeAreaView, StatusBar, Alert, Share } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, RefreshControl, Image, Image as RNImage, TouchableOpacity, Platform, StatusBar, Alert, Share } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAuthStore } from '@/src/store/authStore';
+import { apiClient } from '@/src/api/client';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
+import { COLORS } from '@/src/theme/colors';
+import { socketService } from '@/src/lib/socket';
+import * as Haptics from 'expo-haptics';
+import { ShareModal } from '@/components/ShareModal';
+import { scale, verticalScale, moderateScale, moderateFont, SIZES } from '@/src/utils/responsive';
+import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
+import { useSafeRouter } from '@/src/hooks/useSafeRouter';
+import { useIsFocused } from '@react-navigation/native';
 
 interface ProfilePostVideoItemProps {
   uri: string;
@@ -33,17 +45,38 @@ const ProfilePostVideoItem = ({ uri, shouldPlay, style }: ProfilePostVideoItemPr
     />
   );
 };
-import { apiClient } from '@/src/api/client';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
-import { COLORS } from '@/src/theme/colors';
-import { socketService } from '@/src/lib/socket';
-import * as Haptics from 'expo-haptics';
-import { ShareModal } from '@/components/ShareModal';
-import { scale, verticalScale, moderateScale, moderateFont, SIZES } from '@/src/utils/responsive';
-import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
-import { useSafeRouter } from '@/src/hooks/useSafeRouter';
-import { useIsFocused } from '@react-navigation/native';
+
+
+/**
+ * SmartPostImageProfile — dynamically reads real image dimensions
+ * so photos render at their true aspect ratio without cropping.
+ * Clamps ratio: 9:16 (tall portrait) to 1.91:1 (wide landscape).
+ */
+function SmartPostImageProfile({ uri, style }: { uri: string; style?: any }) {
+  const containerWidth = SIZES.width;
+  const [imgHeight, setImgHeight] = useState<number>(containerWidth);
+
+  useEffect(() => {
+    if (!uri) return;
+    RNImage.getSize(
+      uri,
+      (w, h) => {
+        if (!w || !h) return;
+        const ratio = Math.min(Math.max(h / w, 0.5625), 1.91);
+        setImgHeight(containerWidth * ratio);
+      },
+      () => {}
+    );
+  }, [uri, containerWidth]);
+
+  return (
+    <Image
+      source={{ uri }}
+      style={[{ width: containerWidth, height: imgHeight, backgroundColor: '#111' }, style]}
+      resizeMode="contain"
+    />
+  );
+}
 
 export default function ProfilePostFeedScreen() {
   const isFocused = useIsFocused();
@@ -147,9 +180,19 @@ export default function ProfilePostFeedScreen() {
       }));
     };
 
+    const handlePostDeleted = (data: { postId: string }) => {
+      if (!data?.postId) return;
+      setPosts(prev => prev.filter(p => {
+        const id = String(p._id || p.id);
+        return id !== String(data.postId);
+      }));
+    };
+
     socketService.socket.on('post:updated', handlePostUpdate);
+    socketService.socket.on('post:deleted', handlePostDeleted);
     return () => {
       socketService.socket?.off('post:updated', handlePostUpdate);
+      socketService.socket?.off('post:deleted', handlePostDeleted);
     };
   }, []);
 
@@ -159,6 +202,20 @@ export default function ProfilePostFeedScreen() {
     setHasMore(true);
     fetchUserPosts(1, true);
   }, [userId]);
+
+  // Re-fetch when screen comes into focus (e.g. after deleting a post and navigating back)
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!isFocused) return;
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return; // skip first mount — initial fetchUserPosts above already handles it
+    }
+    // Refetch fresh list on re-focus
+    setPage(1);
+    setHasMore(true);
+    fetchUserPosts(1, true);
+  }, [isFocused]);
 
   const loadMore = () => {
     if (hasMore && !loading) {
@@ -245,7 +302,7 @@ export default function ProfilePostFeedScreen() {
               style={styles.postImage}
             />
           ) : (
-            <Image source={{ uri: resolveMediaUrl(item.media_urls[0]) }} style={styles.postImage} resizeMode="cover" />
+            <SmartPostImageProfile uri={resolveMediaUrl(item.media_urls[0])} style={{ borderRadius: 0 }} />
           )
         ) : null}
 
@@ -394,7 +451,7 @@ const styles = StyleSheet.create({
   postUsername: { fontSize: moderateFont(15), fontWeight: 'bold', color: COLORS.text },
   postLocation: { fontSize: moderateFont(12), color: COLORS.subtitle },
   
-  postImage: { width: SIZES.width, height: SIZES.width * 1.25, backgroundColor: COLORS.surface },
+  postImage: { width: SIZES.width, height: SIZES.width, backgroundColor: COLORS.surface },
   
   postActions: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: scale(16), paddingTop: verticalScale(12), paddingBottom: verticalScale(8) },
   leftActions: { flexDirection: 'row', gap: scale(20) },

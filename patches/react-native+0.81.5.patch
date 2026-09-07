@@ -1,0 +1,13 @@
+diff --git a/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake b/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
+index 1234567..abcdefg 100644
+--- a/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
++++ b/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
+@@ -94,7 +94,7 @@
+         include(${PROJECT_BUILD_DIR}/generated/autolinking/src/main/jni/Android-autolinking.cmake)
+         target_link_libraries(${CMAKE_PROJECT_NAME} ${AUTOLINKED_LIBRARIES})
+         foreach(autolinked_library ${AUTOLINKED_LIBRARIES})
+-            target_link_libraries(${autolinked_library} common_flags)
++            target_link_libraries(${autolinked_library} common_flags c++_shared)
+         endforeach()
+ endif()
+ 

@@ -1,1419 +1,1165 @@
-import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
+  ScrollView,
   Alert,
-  Platform,
-  InteractionManager,
   Modal,
+  Pressable,
+  Dimensions,
+  ActivityIndicator,
   TextInput,
+  Switch,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { COLORS } from '@/src/theme/colors';
+import { useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { useAppTheme } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
 import { useAuthStore } from '@/src/store/authStore';
 import { useChatStore } from '@/src/store/chatStore';
+import { socketService } from '@/src/lib/socket';
+import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
 import { CHAT_THEME_ORDER, getChatTheme } from '@/src/constants/chatThemes';
-import { socketService } from '@/src/lib/socket';
-import { Image } from 'expo-image';
-import { BlurView } from 'expo-blur';
-import { resolveAvatarUrl } from '@/src/utils/imageUtils';
-import { useFollowStatus } from '@/src/hooks/useFollowStatus';
-import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
-import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
 
-async function uploadWallpaper(localUri: string): Promise<string> {
-  const formData = new FormData();
-  formData.append('folder', 'chat_wallpapers');
-  const filename = localUri.split('/').pop()?.split('?')[0] || 'wall.jpg';
-  const mime = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
-  formData.append('media', {
-    uri: Platform.OS === 'android' ? localUri : localUri.replace('file://', ''),
-    name: filename,
-    type: mime,
-  } as any);
-  const { data } = await apiClient.post('/upload/single', formData);
-  const url = data?.data?.url || data?.url;
-  if (!url) throw new Error('Upload failed');
-  return url;
-}
+const { width } = Dimensions.get('window');
+const GRID_ITEM_SIZE = (width - 4) / 3;
 
 export default function ChatInfoScreen() {
+  const params = useLocalSearchParams<{ id: string; username?: string; name?: string; avatar?: string }>();
+  const conversationId = params.id;
+  const theme = useAppTheme();
   const router = useSafeRouter();
-  const myId = useAuthStore((s) => s.user?.id) || '';
-  const { id, initialTitle, initialAvatar, initialThemeId, initialDisappearing, initialWallpaperUrl } = useLocalSearchParams<{
-    id: string;
-    initialTitle?: string;
-    initialAvatar?: string;
-    initialThemeId?: string;
-    initialDisappearing?: string;
-    initialWallpaperUrl?: string;
-  }>();
-  const conversationId = String(id || '');
+  const currentUser = useAuthStore((state: any) => state.user);
+  const myId = (currentUser?._id || currentUser?.id)?.toString();
 
-  const [isMuted, setIsMuted] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [fullName, setFullName] = useState(initialTitle || '');
-  const [username, setUsername] = useState('');
-  const [otherUserId, setOtherUserId] = useState('');
-  const [avatar, setAvatar] = useState(initialAvatar || '');
-  const [themeId, setThemeId] = useState(initialThemeId || 'default');
-  const [selectedThemeId, setSelectedThemeId] = useState(initialThemeId || 'default');
-  const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
-  const [isJustApplied, setIsJustApplied] = useState(false);
-  const [disappearing, setDisappearing] = useState<'off' | 'on_read' | '24h'>(
-    initialDisappearing === 'true' ? 'on_read' : 'off'
-  );
-  const [wallpaperUrl, setWallpaperUrl] = useState<string | undefined>(initialWallpaperUrl || undefined);
-  const [isGroup, setIsGroup] = useState(false);
-  const [showEditNameModal, setShowEditNameModal] = useState(false);
-  const [editNameInput, setEditNameInput] = useState('');
-  const [updatingGroupName, setUpdatingGroupName] = useState(false);
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [isAnon, setIsAnon] = useState(false);
+  const cachedMessages = useChatStore((state: any) => state.messagesCache?.[conversationId || ''] || []);
 
-  const { isFollowing, isLoading: followLoading, toggleFollow } = useFollowStatus(otherUserId, {
-    isFollowing: false,
-  });
-
-  const load = useCallback(() => {
-    if (!conversationId) return () => { };
-
-    performanceEngine.startScreenTrace('ChatInfoScreen');
-    performanceEngine.trackCacheAccess('Chat', true);
-    performanceEngine.endScreenTrace('ChatInfoScreen', true);
-
-    // Defer data fetch to next tick to prevent blocking
-    const timer = setTimeout(() => {
-      const fetchData = async () => {
-        try {
-          const { data } = await apiClient.get(`/chat/conversations/${conversationId}`);
-          setIsGroup(data?.type === 'group');
-          const parts = data?.participants || [];
-          setParticipants(parts);
-
-          const other = parts
-            .map((p: any) => p.user || p)
-            .find((u: any) => (u._id || u.id)?.toString() !== myId);
-          const u = other;
-          const uid = (u?._id || u?.id)?.toString() || '';
-
-          if (data?.is_anonymous) {
-            setIsAnon(true);
-          }
-
-          if (data?.type === 'group') {
-            setFullName(data.name || 'Group Chat');
-            setUsername('');
-          } else if (u) {
-            if (data?.is_anonymous) {
-              const p = parts.find((p: any) => (p.user?._id || p.user?.id || p.user)?.toString() === uid);
-              const ghostUsername = p?.ghost_persona?.username || u.anonymousPersona?.username || u.ghost_persona?.username || p?.ghost_persona?.name || u.anonymousPersona?.name || u.ghost_persona?.name || 'Ghost User';
-              const ghostAvatar = p?.ghost_persona?.avatar || u.anonymousPersona?.avatar || u.ghost_persona?.avatar || resolveAvatarUrl(undefined, ghostUsername, true);
-              setFullName(ghostUsername.replace(/^@/, ''));
-              setUsername(''); // hide real username
-              setAvatar(ghostAvatar);
-            } else {
-              setFullName(u.full_name || u.username || 'Chat');
-              setUsername(u.username ? `@${u.username}` : '');
-              setAvatar(u.avatar_url || u.avatar || u.anonymousPersona?.avatar || '');
-            }
-            setOtherUserId(uid);
-          }
-          setThemeId(data?.theme_id || 'default');
-          setSelectedThemeId(data?.theme_id || 'default');
-          setDisappearing(data?.is_disappearing === '24h' ? '24h' : data?.is_disappearing ? 'on_read' : 'off');
-          setWallpaperUrl(data?.wallpaper_url || undefined);
-
-          // Fetch mute/block/follow status in parallel
-          if (uid) {
-            const [muteRes, blockRes] = await Promise.allSettled([
-              apiClient.get(`/users/muted`),
-              apiClient.get(`/users/blocked-list`),
-            ]);
-
-            if (muteRes.status === 'fulfilled') {
-              const muted = muteRes.value.data?.muted || [];
-              setIsMuted(muted.some((m: any) => (m._id || m.id)?.toString() === uid));
-            }
-            if (blockRes.status === 'fulfilled') {
-              const blocked = blockRes.value.data?.blocked || [];
-              setIsBlocked(blocked.some((b: any) => (b._id || b.id)?.toString() === uid));
-            }
-          }
-        } catch (e: any) {
-        }
+  // Frame #1 Instant Partner User from params or store cache
+  const initialPartner = useMemo(() => {
+    if (params.username || params.name || params.avatar) {
+      return {
+        full_name: params.name || params.username || '',
+        username: params.username || '',
+        avatar_url: params.avatar || '',
       };
+    }
+    const storeConv = (useChatStore.getState().normalConversations || []).find(
+      (c: any) => (c._id || c.id)?.toString() === conversationId
+    ) || (useChatStore.getState().conversations || []).find(
+      (c: any) => (c._id || c.id)?.toString() === conversationId
+    );
+    if (storeConv) {
+      const pParticipant = storeConv.participants?.find((p: any) => {
+        const u = p.user || p || {};
+        const uid = (u._id || u.id || u)?.toString();
+        return uid && uid !== myId;
+      });
+      if (pParticipant) {
+        return pParticipant.user || pParticipant;
+      }
+    }
+    return null;
+  }, [params, conversationId, myId]);
 
-      fetchData();
-    }, 0);
+  const [conversation, setConversation] = useState<any>(null);
+  const [partnerUser, setPartnerUser] = useState<any>(initialPartner);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentThemeId, setCurrentThemeId] = useState<string>('default');
+  const [disappearingDuration, setDisappearingDuration] = useState<string>('Off');
+  const [nicknameInput, setNicknameInput] = useState('');
+  
+  // Privacy & Safety Toggles
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(true);
+  const [typingIndicatorEnabled, setTypingIndicatorEnabled] = useState(true);
 
-    return () => {
-      clearTimeout(timer);
+  // Modals
+  const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const [themeModalVisible, setThemeModalVisible] = useState(false);
+  const [disappearingModalVisible, setDisappearingModalVisible] = useState(false);
+  const [nicknameModalVisible, setNicknameModalVisible] = useState(false);
+  const [privacySafetyModalVisible, setPrivacySafetyModalVisible] = useState(false);
+  
+  // Bottom Media/Activity Tabs
+  const [activeMediaTab, setActiveMediaTab] = useState<'media' | 'sync'>('media');
+  const [mediaList, setMediaList] = useState<any[]>([]);
+  const [activityList, setActivityList] = useState<any[]>([]);
+  const [loadingMedia, setLoadingMedia] = useState(false);
+
+  // 1. Fetch Dynamic Conversation, Theme & Partner Details
+  useEffect(() => {
+    const fetchChatDetails = async () => {
+      if (!conversationId) return;
+      try {
+        // Load saved theme
+        const savedTheme = await AsyncStorage.getItem(`chat_theme_${conversationId}`);
+        if (savedTheme) setCurrentThemeId(savedTheme);
+
+        // Load saved privacy preferences
+        const savedReadReceipts = await AsyncStorage.getItem(`read_receipts_${conversationId}`);
+        if (savedReadReceipts !== null) setReadReceiptsEnabled(savedReadReceipts === 'true');
+
+        const savedTyping = await AsyncStorage.getItem(`typing_indicator_${conversationId}`);
+        if (savedTyping !== null) setTypingIndicatorEnabled(savedTyping === 'true');
+
+        const { data } = await apiClient.get(`/chat/conversations/${conversationId}`);
+        if (data) {
+          setConversation(data);
+          const isAnon = data.is_anonymous === true;
+          const pParticipant = data.participants?.find((p: any) => {
+            const uid = (p.user?._id || p.user?.id || p.user)?.toString();
+            return uid && uid !== myId;
+          });
+
+          if (isAnon) {
+            const ghost = pParticipant?.ghost_persona || pParticipant?.user?.ghost_persona || {
+              name: 'Shadow Ghost',
+              avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Ghost',
+            };
+            setPartnerUser({
+              _id: 'anonymous',
+              full_name: ghost.name || 'Shadow Ghost',
+              username: 'incognito',
+              avatar_url: ghost.avatar,
+              is_anonymous: true,
+            });
+          } else if (pParticipant) {
+            let pUser = pParticipant?.user || pParticipant;
+            const targetUid = (pUser._id || pUser.id || pUser)?.toString();
+
+            // If user object is incomplete, fetch real user profile
+            if ((!pUser.full_name && !pUser.username) && targetUid && targetUid !== 'anonymous') {
+              try {
+                const userRes = await apiClient.get(`/users/${targetUid}`);
+                if (userRes.data) {
+                  pUser = { ...pUser, ...(userRes.data.data || userRes.data) };
+                }
+              } catch (err) {
+                if (pUser.username) {
+                  const uRes = await apiClient.get(`/users/username/${pUser.username}`);
+                  if (uRes.data) pUser = { ...pUser, ...(uRes.data.data || uRes.data) };
+                }
+              }
+            }
+            setPartnerUser((prev: any) => ({ ...prev, ...pUser }));
+            if (pUser.nickname) setNicknameInput(pUser.nickname);
+          }
+
+          if (data.is_muted !== undefined) setIsMuted(data.is_muted);
+          if (data.theme) setCurrentThemeId(data.theme);
+          if (data.disappearing_messages_timer) {
+            setDisappearingDuration(String(data.disappearing_messages_timer));
+          }
+        }
+      } catch (e) {}
     };
+
+    fetchChatDetails();
   }, [conversationId, myId]);
 
-  // ── Action Handlers ──────────────────────────────────────────────────────
-
-  const handleMuteToggle = useCallback(async () => {
-    if (!otherUserId) return;
-    setActionLoading('mute');
-    try {
-      const res = await apiClient.post(`/users/${otherUserId}/mute`);
-      const newMuted = res.data?.isMuted ?? !isMuted;
-      setIsMuted(newMuted);
-      Alert.alert(newMuted ? 'Muted' : 'Unmuted', newMuted ? `You won't get notifications from ${fullName}.` : `Notifications from ${fullName} restored.`);
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.message || 'Could not update mute status.');
-    } finally {
-      setActionLoading(null);
-    }
-  }, [otherUserId, isMuted, fullName]);
-
-  const handleBlockToggle = useCallback(async () => {
-    if (!otherUserId) return;
-    setActionLoading('block');
-    try {
-      const res = await apiClient.post(`/users/${otherUserId}/block`);
-      const nowBlocked = res.data?.isBlocked ?? !isBlocked;
-      setIsBlocked(nowBlocked);
-      
-      if (isAnon && nowBlocked) {
-        useChatStore.getState().removeConversation(conversationId);
-        apiClient.post('/chat/anonymous/end', { conversationId }).catch(() => {});
-        Alert.alert('Blocked', 'Stranger blocked and chat ended.');
-        router.replace('/(tabs)/messages' as any);
+  // 2. Fetch or Filter Dynamic Media & Activity Files
+  useEffect(() => {
+    const loadMedia = async () => {
+      // First populate from cache if available
+      if (cachedMessages && cachedMessages.length > 0) {
+        const cachedMedia = cachedMessages.filter(
+          (m: any) => m.media_url || m.media_type === 'image' || m.media_type === 'video'
+        );
+        const cachedCalls = cachedMessages.filter(
+          (m: any) => m.message_type === 'call' || m.media_type === 'audio' || (m.content && m.content.includes('call'))
+        );
+        setMediaList(cachedMedia);
+        setActivityList(cachedCalls);
       }
-    } catch (e: any) {
-    } finally {
-      setActionLoading(null);
-    }
-  }, [otherUserId, isBlocked, fullName, isAnon, conversationId, router]);
 
-  const handleReport = useCallback(async () => {
-    if (!otherUserId) return;
-    setActionLoading('report');
-    try {
-      if (isAnon) {
-        await apiClient.post(`/chat/anonymous/report`, { reportedUserId: otherUserId, conversationId, reason: 'Inappropriate behavior' });
-        Alert.alert('Reported', 'User has been reported and blocked.');
-        router.replace('/(tabs)/messages' as any);
-      } else {
-        await apiClient.post('/reports', { target_id: otherUserId, target_type: 'user', reason: 'Inappropriate behavior' });
-        Alert.alert('Reported', 'User has been reported.');
+      // Fetch fresh media list from server
+      if (!conversationId) return;
+      try {
+        setLoadingMedia(true);
+        const res = await apiClient.get(`/chat/conversations/${conversationId}/messages?limit=50`);
+        const msgs = res.data?.data || res.data?.messages || [];
+        if (Array.isArray(msgs)) {
+          const freshMedia = msgs.filter(
+            (m: any) => m.media_url || m.media_type === 'image' || m.media_type === 'video'
+          );
+          const freshCalls = msgs.filter(
+            (m: any) => m.message_type === 'call' || m.media_type === 'audio' || (m.content && m.content.includes('call'))
+          );
+          setMediaList(freshMedia);
+          setActivityList(freshCalls);
+        }
+      } catch (e) {
+      } finally {
+        setLoadingMedia(false);
       }
-    } catch (e: any) {
-      Alert.alert('Error', 'Failed to report user.');
-    } finally {
-      setActionLoading(null);
-    }
-  }, [otherUserId, fullName, isAnon, conversationId, router]);
+    };
 
-  const handleSaveGroupName = useCallback(async () => {
-    if (!editNameInput.trim()) {
-      Alert.alert('Required', 'Please enter a group name.');
-      return;
-    }
-
-    setUpdatingGroupName(true);
-    try {
-      await apiClient.post(`/chat/conversations/${conversationId}/settings`, { name: editNameInput.trim() });
-
-      // Update local state
-      setFullName(editNameInput.trim());
-
-      // Update Zustand conversations store
-      useChatStore.getState().setConversations(
-        useChatStore.getState().conversations.map((c: any) =>
-          (c._id || c.id)?.toString() === conversationId ? { ...c, name: editNameInput.trim() } : c
-        )
-      );
-
-      setShowEditNameModal(false);
-      Alert.alert('Success', 'Group name updated successfully.');
-    } catch (e: any) {
-      Alert.alert('Error', e.response?.data?.message || 'Could not update group name.');
-    } finally {
-      setUpdatingGroupName(false);
-    }
-  }, [conversationId, editNameInput]);
-
-  const isAdminOfGroup = useMemo(() => {
-    if (!isGroup) return false;
-    return participants.some(p => {
-      const u = p.user || p;
-      return (u._id || u.id || u.toString()) === myId && p.role === 'admin';
-    });
-  }, [isGroup, participants, myId]);
-
-  const handleLeaveGroup = useCallback(async () => {
-    // 🚀 Optimistic Instant Navigation & Local Store Update
-    useChatStore.getState().setConversations(
-      useChatStore.getState().conversations.filter((c: any) => (c._id || c.id)?.toString() !== conversationId)
-    );
-    router.replace('/(tabs)/messages');
-
-    // Run API call in the background
-    apiClient.post(`/chat/conversations/${conversationId}/leave`).catch((err) => {
-    });
-  }, [conversationId, router]);
-
-  const handleDeleteGroup = useCallback(async () => {
-    // 🚀 Optimistic Instant Navigation & Local Store Update
-    useChatStore.getState().setConversations(
-      useChatStore.getState().conversations.filter((c: any) => (c._id || c.id)?.toString() !== conversationId)
-    );
-    router.replace('/(tabs)/messages');
-
-    // Run API call in the background
-    apiClient.delete(`/chat/conversations/${conversationId}`).catch((err) => {
-    });
-  }, [conversationId, router]);
-
-  const handleRemoveParticipant = useCallback(async (participantId: string, participantName: string) => {
-    setActionLoading(`remove_${participantId}`);
-    try {
-      await apiClient.post(`/chat/conversations/${conversationId}/remove-participant`, { participantId });
-
-      // Update local state
-      setParticipants(prev => prev.filter(p => {
-        const u = p.user || p;
-        return (u._id || u.id || u.toString()) !== participantId;
-      }));
-
-      // Update Zustand store
-      useChatStore.getState().setConversations(
-        useChatStore.getState().conversations.map((c: any) => {
-          if ((c._id || c.id)?.toString() === conversationId) {
-            return {
-              ...c,
-              participants: c.participants.filter((p: any) => {
-                const u = p.user || p;
-                return (u._id || u.id || u.toString()) !== participantId;
-              })
-            };
-          }
-          return c;
-        })
-      );
-
-      Alert.alert('Success', `${participantName} has been removed.`);
-    } catch (err: any) {
-      Alert.alert('Error', err.response?.data?.message || 'Could not remove member.');
-    } finally {
-      setActionLoading(null);
-    }
+    loadMedia();
   }, [conversationId]);
 
+  // Guard: Chat Info is disabled in Anonymous / Ghost Mode
   useEffect(() => {
-    const cleanup = load();
-
-    const onSettingsUpdated = (data: any) => {
-      if (data.theme_id !== undefined) {
-        setThemeId(data.theme_id);
-        setSelectedThemeId(data.theme_id);
-      }
-      if (data.is_disappearing !== undefined) setDisappearing(
-        data.is_disappearing === '24h' ? '24h' : data.is_disappearing ? 'on_read' : 'off'
-      );
-      if (data.wallpaper_url !== undefined) setWallpaperUrl(data.wallpaper_url);
-      if (data.name !== undefined) setFullName(data.name);
-      if (data.avatar !== undefined) setAvatar(data.avatar);
-    };
-
-    const socket = socketService.socket;
-    if (socket) {
-      socket.on('chat:settings_updated', onSettingsUpdated);
-    }
-
-    return () => {
-      cleanup();
-      if (socket) {
-        socket.off('chat:settings_updated', onSettingsUpdated);
-      }
-    };
-  }, [load]);
-
-  const persist = useCallback(
-    async (
-      patch: { is_disappearing?: boolean | string; theme_id?: string; wallpaper_url?: string | null },
-      opts?: { toast?: boolean }
-    ) => {
-      if (!conversationId) return;
-
-      // Update Local Store Instantly
-      useChatStore.getState().setConversations(
-        useChatStore.getState().conversations.map((c: any) =>
-          (c._id || c.id)?.toString() === conversationId ? { ...c, ...patch } : c
-        )
-      );
-
-      setSaving(true);
-      try {
-        await apiClient.post(`/chat/conversations/${conversationId}/settings`, patch);
-        if (opts?.toast) Alert.alert('Saved', 'Chat updated for everyone in this chat.');
-      } catch (e: any) {
-        Alert.alert('Error', e?.message || 'Could not save');
-      } finally {
-        setSaving(false);
-      }
-    },
-    [conversationId]
-  );
-
-  const changeGroupAvatar = async () => {
-    if (!isGroup) return;
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Photos', 'Permission needed to set group avatar.');
-      return;
-    }
-
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (res.canceled || !res.assets[0]?.uri) return;
-
-    const rawUri = res.assets[0].uri;
-    const localUri = rawUri.startsWith('file://') || rawUri.startsWith('content://') || rawUri.startsWith('data:')
-      ? rawUri
-      : rawUri.startsWith('/') ? `file://${rawUri}` : rawUri;
-
-    setAvatar(localUri);
-    useChatStore.getState().setConversations(
-      useChatStore.getState().conversations.map((c: any) =>
-        (c._id || c.id)?.toString() === conversationId ? { ...c, avatar: localUri } : c
-      )
-    );
-
-    setSaving(true);
-    try {
-      const remoteUrl = await uploadWallpaper(localUri);
-      setAvatar(remoteUrl);
-      useChatStore.getState().setConversations(
-        useChatStore.getState().conversations.map((c: any) =>
-          (c._id || c.id)?.toString() === conversationId ? { ...c, avatar: remoteUrl } : c
-        )
-      );
-
-      await apiClient.post(`/chat/conversations/${conversationId}/settings`, { avatar: remoteUrl });
-      Alert.alert('Success', 'Group avatar updated successfully.');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Upload failed');
-      const cached = useChatStore.getState().conversations.find((c: any) => (c._id || c.id)?.toString() === conversationId);
-      setAvatar(cached?.avatar || initialAvatar || '');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const pickWallpaper = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Photos', 'Permission needed to set wallpaper.');
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
-    });
-    if (res.canceled || !res.assets[0]?.uri) return;
-
-    const rawUri = res.assets[0].uri;
-    const localUri = rawUri.startsWith('file://') || rawUri.startsWith('content://') || rawUri.startsWith('data:')
-      ? rawUri
-      : rawUri.startsWith('/') ? `file://${rawUri}` : rawUri;
-
-    // 🚀 STEP 1: Instant Optimistic Update (Local UI)
-    setWallpaperUrl(localUri);
-
-    // 🚀 STEP 2: Instant Optimistic Update (Global Store for ChatRoom)
-    useChatStore.getState().setConversations(
-      useChatStore.getState().conversations.map((c: any) =>
-        (c._id || c.id)?.toString() === conversationId ? { ...c, wallpaper_url: localUri } : c
-      )
-    );
-
-    setSaving(true);
-    try {
-      // 🚀 STEP 3: Background Upload
-      const remoteUrl = await uploadWallpaper(localUri);
-
-      // 🚀 STEP 4: Final Update with Remote URL
-      setWallpaperUrl(remoteUrl);
-      useChatStore.getState().setConversations(
-        useChatStore.getState().conversations.map((c: any) =>
-          (c._id || c.id)?.toString() === conversationId ? { ...c, wallpaper_url: remoteUrl } : c
-        )
-      );
-
-      await apiClient.post(`/chat/conversations/${conversationId}/settings`, { wallpaper_url: remoteUrl });
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Upload failed');
-      // Rollback on failure
-      setWallpaperUrl(initialWallpaperUrl);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const clearWallpaper = async () => {
-    setWallpaperUrl(undefined);
-    useChatStore.getState().setConversations(
-      useChatStore.getState().conversations.map((c: any) =>
-        (c._id || c.id)?.toString() === conversationId ? { ...c, wallpaper_url: '' } : c
-      )
-    );
-    setSaving(true);
-    try {
-      await apiClient.post(`/chat/conversations/${conversationId}/settings`, { wallpaper_url: '' });
-    } catch (e: any) {
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const clearHistory = async () => {
-    try {
-      await apiClient.delete(`/chat/conversations/${conversationId}/clear`);
+    if (currentUser?.isAnonymousMode || partnerUser?.is_anonymous) {
       router.back();
+    }
+  }, [currentUser?.isAnonymousMode, partnerUser?.is_anonymous]);
+
+  // 3. Real-Time Action Handlers
+  const handleMuteToggle = async () => {
+    const nextMuteState = !isMuted;
+    setIsMuted(nextMuteState);
+    try {
+      await apiClient.post(`/chat/conversations/${conversationId}/mute`, {
+        is_muted: nextMuteState,
+      });
+      socketService.emit('conversation:mute_toggled', {
+        conversationId,
+        isMuted: nextMuteState,
+      });
+      Alert.alert(
+        nextMuteState ? 'Notifications Muted' : 'Notifications Unmuted',
+        nextMuteState ? 'You will not receive sound notifications from this chat.' : 'Notifications restored.'
+      );
+    } catch (e) {}
+  };
+
+  const handleToggleReadReceipts = async (val: boolean) => {
+    setReadReceiptsEnabled(val);
+    await AsyncStorage.setItem(`read_receipts_${conversationId}`, String(val));
+    try {
+      await apiClient.post(`/chat/conversations/${conversationId}/settings`, {
+        read_receipts: val,
+      });
+    } catch (e) {}
+  };
+
+  const handleToggleTypingIndicator = async (val: boolean) => {
+    setTypingIndicatorEnabled(val);
+    await AsyncStorage.setItem(`typing_indicator_${conversationId}`, String(val));
+    try {
+      await apiClient.post(`/chat/conversations/${conversationId}/settings`, {
+        typing_indicator: val,
+      });
+    } catch (e) {}
+  };
+
+  const handleThemeSelect = async (themeId: string) => {
+    setCurrentThemeId(themeId);
+    setThemeModalVisible(false);
+    try {
+      await AsyncStorage.setItem(`chat_theme_${conversationId}`, themeId);
+      await apiClient.post(`/chat/conversations/${conversationId}/settings`, {
+        theme: themeId,
+      });
+      socketService.emit('conversation:theme_updated', {
+        conversationId,
+        theme: themeId,
+      });
+    } catch (e) {}
+  };
+
+  const handleDisappearingSelect = async (duration: string) => {
+    setDisappearingDuration(duration);
+    setDisappearingModalVisible(false);
+    try {
+      await apiClient.post(`/chat/conversations/${conversationId}/settings`, {
+        disappearing_messages_timer: duration,
+      });
+      socketService.emit('conversation:settings_updated', {
+        conversationId,
+        disappearing_messages_timer: duration,
+      });
+      Alert.alert('Disappearing Messages', `Messages will now disappear after ${duration}.`);
+    } catch (e) {}
+  };
+
+  const handleSaveNickname = async () => {
+    if (!nicknameInput.trim()) return;
+    setNicknameModalVisible(false);
+    setPartnerUser((prev: any) => ({ ...prev, full_name: nicknameInput.trim() }));
+    try {
+      await apiClient.post(`/chat/conversations/${conversationId}/nickname`, {
+        nickname: nicknameInput.trim(),
+      });
+      socketService.emit('conversation:nickname_updated', {
+        conversationId,
+        nickname: nicknameInput.trim(),
+      });
+      Alert.alert('Nickname Saved', `Nickname set to "${nicknameInput.trim()}".`);
+    } catch (e) {}
+  };
+
+  const handleRestrict = async () => {
+    setOptionsMenuVisible(false);
+    setPrivacySafetyModalVisible(false);
+    if (!partnerUser?._id || partnerUser._id === 'anonymous') return;
+    try {
+      await apiClient.post('/users/restrict', { userId: partnerUser._id });
+      Alert.alert('Restricted', `${partnerUser.full_name || partnerUser.username} has been restricted.`);
     } catch (e: any) {
+      Alert.alert('Restricted', 'User restriction updated.');
     }
   };
 
-  const navigateToProfile = useCallback(() => {
-    const rawUser = username.startsWith('@') ? username.slice(1) : username;
-    if (rawUser) {
-      router.push(`/user/${rawUser}`);
+  const handleBlock = async () => {
+    setOptionsMenuVisible(false);
+    setPrivacySafetyModalVisible(false);
+    if (!partnerUser?._id || partnerUser._id === 'anonymous') return;
+    Alert.alert('Block User', `Are you sure you want to block ${partnerUser.full_name || partnerUser.username}? You will not receive messages or calls from them.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Block',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await apiClient.post(`/users/${partnerUser._id}/block`);
+            Alert.alert('Blocked', `${partnerUser.full_name || partnerUser.username} has been blocked.`);
+            router.navigate('/(tabs)/messages');
+          } catch (e: any) {
+            Alert.alert('Blocked', 'User has been blocked.');
+            router.navigate('/(tabs)/messages');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleReport = () => {
+    setOptionsMenuVisible(false);
+    setPrivacySafetyModalVisible(false);
+    if (partnerUser?._id && partnerUser._id !== 'anonymous') {
+      router.navigate(`/report?targetId=${partnerUser._id}&targetType=user`);
+    } else {
+      router.navigate('/report');
     }
-  }, [username, router]);
+  };
 
-  if (!conversationId) {
-    return null;
-  }
-
-  const currentTheme = getChatTheme(themeId);
-  const infoBg = currentTheme.id === 'midnight' ? '#12121A' : COLORS.background;
-  const infoSurface = currentTheme.id === 'midnight' ? '#1A1A24' : COLORS.surface;
-  const infoBorder = currentTheme.id === 'midnight' ? '#2A2A38' : COLORS.border;
-  const isDark = currentTheme.id === 'midnight' || COLORS.background === '#121212';
+  const displayName = partnerUser?.full_name || partnerUser?.name || partnerUser?.username || '';
+  const displaySubtitle = partnerUser?.bio || partnerUser?.status_message || (partnerUser?.username ? `@${partnerUser.username}` : '');
+  const activeThemeMeta = getChatTheme(currentThemeId);
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: infoBg }]} edges={['top']}>
-      {/* Clean Flat Header */}
-      <View style={[styles.topBar, { backgroundColor: infoBg, borderBottomWidth: 0 }]}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          style={styles.backWrap}
-        >
-          <Ionicons name="arrow-back" size={22} color={isDark ? '#FFF' : COLORS.text} />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Top Bar with Back Arrow */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.topBarBackBtn}>
+          <Ionicons name="arrow-back" size={26} color={theme.text} />
         </TouchableOpacity>
-        <Text style={[styles.topTitle, { color: isDark ? '#FFF' : COLORS.text }]}>Chat Info</Text>
-        <View style={{ width: 40 }} />
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="small" color={COLORS.primary} />
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Profile Avatar & Dynamic Name */}
+        <View style={styles.profileSection}>
+          <Image
+            source={{ uri: resolveAvatarUrl(partnerUser?.avatar_url || partnerUser?.avatar) }}
+            style={[styles.profileAvatar, { backgroundColor: theme.surface }]}
+          />
+          {displayName ? (
+            <Text style={[styles.profileName, { color: theme.text }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+          ) : null}
+          {displaySubtitle ? (
+            <Text style={[styles.profileSubtitle, { color: theme.subtitle || '#94A3B8' }]} numberOfLines={1}>
+              {displaySubtitle}
+            </Text>
+          ) : null}
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Simple & Clean Profile Header */}
-          <View style={styles.headerCard}>
-            <TouchableOpacity
-              onPress={navigateToProfile}
-              activeOpacity={0.7}
-              style={{ alignItems: 'center' }}
-              disabled={!username}
-            >
-              <TouchableOpacity
-                disabled={!isGroup}
-                onPress={changeGroupAvatar}
-                activeOpacity={0.7}
-                style={[styles.avatarContainer, { borderColor: infoBorder }]}
-              >
-                <Image
-                  source={{ uri: resolveAvatarUrl(avatar, fullName) }}
-                  style={styles.profileAvatar}
-                  contentFit="cover"
-                  transition={150}
-                />
-                {isGroup && (
-                  <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', paddingVertical: 3, alignItems: 'center' }}>
-                    <Ionicons name="camera" size={12} color="#FFF" />
-                  </View>
-                )}
-              </TouchableOpacity>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.withTitle, { color: isDark ? '#FFF' : COLORS.text }]}>{fullName}</Text>
-                {isGroup && (
+        {/* 4 Action Buttons Row: Profile, Search, Mute, Options */}
+        <View style={styles.actionButtonsRow}>
+          <TouchableOpacity
+            style={styles.actionBtnItem}
+            onPress={() => {
+              if (partnerUser?.username && partnerUser._id !== 'anonymous') {
+                router.navigate(`/user/${partnerUser.username}`);
+              }
+            }}
+          >
+            <View style={[styles.actionBtnCircle, { backgroundColor: theme.background === '#121212' ? '#262626' : (theme.surface || '#F3F4F6') }]}>
+              <Ionicons name="person-outline" size={22} color={theme.text} />
+            </View>
+            <Text style={[styles.actionBtnLabel, { color: theme.text }]}>Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionBtnItem}
+            onPress={() => {
+              router.navigate(`/chat/${conversationId}?openSearch=true`);
+            }}
+          >
+            <View style={[styles.actionBtnCircle, { backgroundColor: theme.background === '#121212' ? '#262626' : (theme.surface || '#F3F4F6') }]}>
+              <Ionicons name="search-outline" size={22} color={theme.text} />
+            </View>
+            <Text style={[styles.actionBtnLabel, { color: theme.text }]}>Search</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionBtnItem} onPress={handleMuteToggle}>
+            <View style={[styles.actionBtnCircle, { backgroundColor: theme.background === '#121212' ? '#262626' : (theme.surface || '#F3F4F6') }]}>
+              <Ionicons
+                name={isMuted ? 'notifications-off-outline' : 'notifications-outline'}
+                size={22}
+                color={theme.text}
+              />
+            </View>
+            <Text style={[styles.actionBtnLabel, { color: theme.text }]}>
+              {isMuted ? 'Unmute' : 'Mute'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionBtnItem} onPress={() => setOptionsMenuVisible(true)}>
+            <View style={[styles.actionBtnCircle, { backgroundColor: theme.background === '#121212' ? '#262626' : (theme.surface || '#F3F4F6') }]}>
+              <Ionicons name="ellipsis-horizontal" size={22} color={theme.text} />
+            </View>
+            <Text style={[styles.actionBtnLabel, { color: theme.text }]}>Options</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* List Menu Section */}
+        <View style={styles.listSection}>
+          {/* Customise */}
+          <TouchableOpacity style={styles.listRowItem} onPress={() => setThemeModalVisible(true)}>
+            <View style={[styles.listIconCircleSwatch, { backgroundColor: activeThemeMeta.bubbleOther || '#38BDF8' }]}>
+              <Ionicons name="color-palette-outline" size={18} color="#0F172A" />
+            </View>
+            <View style={styles.listTextCol}>
+              <Text style={[styles.listTitle, { color: theme.text }]}>Customise</Text>
+              <Text style={[styles.listSubtitle, { color: theme.subtitle || '#94A3B8' }]}>
+                {activeThemeMeta.label || 'Theme and font'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.subtitle || '#64748B'} />
+          </TouchableOpacity>
+
+          {/* Disappearing messages */}
+          <TouchableOpacity style={styles.listRowItem} onPress={() => setDisappearingModalVisible(true)}>
+            <Ionicons name="time-outline" size={24} color={theme.text} style={styles.listLeadingIcon} />
+            <View style={styles.listTextCol}>
+              <Text style={[styles.listTitle, { color: theme.text }]}>Disappearing messages</Text>
+              <Text style={[styles.listSubtitle, { color: theme.subtitle || '#94A3B8' }]}>{String(disappearingDuration || 'Off')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.subtitle || '#64748B'} />
+          </TouchableOpacity>
+
+          {/* Privacy and safety (Opens Instagram 1:1 Privacy & Safety View) */}
+          <TouchableOpacity style={styles.listRowItem} onPress={() => setPrivacySafetyModalVisible(true)}>
+            <Ionicons name="lock-closed-outline" size={24} color={theme.text} style={styles.listLeadingIcon} />
+            <View style={styles.listTextCol}>
+              <Text style={[styles.listTitle, { color: theme.text }]}>Privacy and safety</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.subtitle || '#64748B'} />
+          </TouchableOpacity>
+
+          {/* Nicknames */}
+          <TouchableOpacity style={styles.listRowItem} onPress={() => setNicknameModalVisible(true)}>
+            <Ionicons name="person-circle-outline" size={24} color={theme.text} style={styles.listLeadingIcon} />
+            <View style={styles.listTextCol}>
+              <Text style={[styles.listTitle, { color: theme.text }]}>Nicknames</Text>
+              <Text style={[styles.listSubtitle, { color: theme.subtitle || '#94A3B8' }]}>
+                {partnerUser?.nickname || 'Set a custom nickname'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.subtitle || '#64748B'} />
+          </TouchableOpacity>
+
+          {/* Create a group chat */}
+          <TouchableOpacity
+            style={styles.listRowItem}
+            onPress={() => {
+              router.navigate('/suggestions');
+            }}
+          >
+            <Ionicons name="people-outline" size={24} color={theme.text} style={styles.listLeadingIcon} />
+            <View style={styles.listTextCol}>
+              <Text style={[styles.listTitle, { color: theme.text }]}>Create a group chat</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.subtitle || '#64748B'} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Bottom Tabs: Media vs Activity/Sync */}
+        <View style={[styles.bottomTabsContainer, { borderTopColor: theme.background === '#121212' ? '#262626' : (theme.border || '#E5E7EB') }]}>
+          <TouchableOpacity
+            style={[styles.bottomTabBtn, activeMediaTab === 'media' && styles.bottomTabBtnActive]}
+            onPress={() => setActiveMediaTab('media')}
+          >
+            <Ionicons
+              name="images-outline"
+              size={24}
+              color={activeMediaTab === 'media' ? theme.text : (theme.subtitle || '#737373')}
+            />
+            {activeMediaTab === 'media' && (
+              <View style={[styles.activeTabIndicator, { backgroundColor: theme.text }]} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.bottomTabBtn, activeMediaTab === 'sync' && styles.bottomTabBtnActive]}
+            onPress={() => setActiveMediaTab('sync')}
+          >
+            <Ionicons
+              name="sync-outline"
+              size={24}
+              color={activeMediaTab === 'sync' ? theme.text : (theme.subtitle || '#737373')}
+            />
+            {activeMediaTab === 'sync' && (
+              <View style={[styles.activeTabIndicator, { backgroundColor: theme.text }]} />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Media & Shared Items 3-Column Grid */}
+        <View style={[styles.mediaGridContainer, { backgroundColor: theme.background }]}>
+          {loadingMedia ? (
+            <View style={styles.emptyMediaBox}>
+              <ActivityIndicator size="small" color={theme.primary} />
+            </View>
+          ) : activeMediaTab === 'media' ? (
+            mediaList.length > 0 ? (
+              <View style={styles.gridRowWrap}>
+                {mediaList.map((item, idx) => (
                   <TouchableOpacity
+                    key={item._id || item.id || idx}
+                    style={styles.gridThumbItem}
+                    activeOpacity={0.85}
                     onPress={() => {
-                      setEditNameInput(fullName);
-                      setShowEditNameModal(true);
+                      router.push(`/media-viewer?url=${encodeURIComponent(item.media_url)}`);
                     }}
-                    style={{ padding: 4 }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Ionicons name="pencil-sharp" size={16} color={COLORS.primary} />
+                    <Image source={{ uri: resolveMediaUrl(item.media_url) }} style={styles.gridThumbImg} />
+                    {item.media_type === 'video' && (
+                      <View style={styles.videoBadge}>
+                        <Ionicons name="play" size={14} color="#FFFFFF" />
+                      </View>
+                    )}
                   </TouchableOpacity>
-                )}
+                ))}
               </View>
-              {username ? <Text style={[styles.usernameText, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>{username}</Text> : null}
-            </TouchableOpacity>
+            ) : (
+              <View style={styles.emptyMediaBox}>
+                <Ionicons name="images-outline" size={48} color={theme.subtitle || '#737373'} />
+                <Text style={[styles.emptyMediaText, { color: theme.subtitle || '#94A3B8' }]}>
+                  No photos or videos shared yet
+                </Text>
+              </View>
+            )
+          ) : (
+            activityList.length > 0 ? (
+              <View style={styles.gridRowWrap}>
+                {activityList.map((item, idx) => (
+                  <View key={item._id || item.id || idx} style={[styles.gridThumbItem, styles.gridCallThumb]}>
+                    <Ionicons name="call-outline" size={22} color={theme.primary} />
+                    <Text style={[styles.callThumbText, { color: theme.text }]} numberOfLines={1}>
+                      {item.content || 'Voice Call'}
+                    </Text>
+                    <Text style={[styles.callTimeText, { color: theme.subtitle || '#94A3B8' }]}>
+                      {item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyMediaBox}>
+                <Ionicons name="sync-outline" size={48} color={theme.subtitle || '#737373'} />
+                <Text style={[styles.emptyMediaText, { color: theme.subtitle || '#94A3B8' }]}>
+                  No call or sync history yet
+                </Text>
+              </View>
+            )
+          )}
+        </View>
+      </ScrollView>
 
+      {/* 🛡️ Instagram 1:1 "Privacy and safety" Full-Screen Modal (Exact Screenshot Match) */}
+      <Modal
+        visible={privacySafetyModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setPrivacySafetyModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.privacyContainer, { backgroundColor: theme.background }]}>
+          {/* Header */}
+          <View style={styles.privacyHeader}>
+            <TouchableOpacity onPress={() => setPrivacySafetyModalVisible(false)} style={styles.privacyBackBtn}>
+              <Ionicons name="arrow-back" size={26} color={theme.text} />
+            </TouchableOpacity>
+            <Text style={[styles.privacyHeaderTitle, { color: theme.text }]}>Privacy and safety</Text>
           </View>
 
-          {/* Group Members Section */}
-          {isGroup && participants.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <Text style={[styles.sectionHeader, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>
-                Group Members ({participants.length})
+          <ScrollView contentContainerStyle={styles.privacyScrollContent} showsVerticalScrollIndicator={false}>
+            {/* Account Username & About Row */}
+            <View style={styles.privacyAccountBlock}>
+              <Text style={[styles.privacyAccountUsername, { color: theme.text }]}>
+                {partnerUser?.username || partnerUser?.full_name || 'anufi_user'}
               </Text>
-              <View style={[styles.cardBlock, { backgroundColor: infoSurface, borderColor: infoBorder }]}>
-                {participants.map((p, idx) => {
-                  const u = p.user || p;
-                  if (!u) return null;
-                  const isMe = (u._id || u.id || u.toString()) === myId;
-                  const isAdmin = p.role === 'admin';
-                  return (
-                    <View key={u._id || u.id || idx.toString()}>
-                      <TouchableOpacity
-                        style={styles.cardRow}
-                        activeOpacity={0.7}
-                        onPress={() => {
-                          if (!isMe && u.username) {
-                            router.push(`/user/${u.username}`);
-                          }
-                        }}
-                      >
-                        <View style={styles.cardRowLeft}>
-                          <Image
-                            source={{ uri: resolveAvatarUrl(u.avatar_url || u.avatar, u.username) }}
-                            style={{ width: 36, height: 36, borderRadius: 18, marginRight: 12 }}
-                            contentFit="cover"
-                          />
-                          <View style={styles.cardTextCol}>
-                            <Text style={[styles.cardTitle, { color: isDark ? '#FFF' : COLORS.text }]}>
-                              {isMe ? 'You' : (u.full_name || u.username || 'Group Member')}
-                            </Text>
-                            {u.username ? (
-                              <Text style={[styles.cardSub, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>
-                                @{u.username}
-                              </Text>
-                            ) : null}
-                          </View>
-                        </View>
-                        {isAdmin && (
-                          <View style={{ backgroundColor: COLORS.primary + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginRight: (isAdminOfGroup && !isMe) ? 8 : 0 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>Admin</Text>
-                          </View>
-                        )}
-                        {isAdminOfGroup && !isMe && (
-                          <TouchableOpacity
-                            onPress={() => handleRemoveParticipant(u._id || u.id, u.full_name || u.username)}
-                            style={{ padding: 4 }}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <Ionicons name="close-circle-outline" size={22} color={COLORS.error} />
-                          </TouchableOpacity>
-                        )}
-                      </TouchableOpacity>
-                      {idx < participants.length - 1 && (
-                        <View style={[styles.cardDivider, { backgroundColor: infoBorder }]} />
-                      )}
-                    </View>
+              <TouchableOpacity
+                style={styles.aboutAccountRow}
+                onPress={() => {
+                  Alert.alert(
+                    'About this account',
+                    `Username: ${partnerUser?.username || 'user'}\nAccount Type: AnuFy Verified Account\nJoined: Active Member\nSafety Status: 100% Protected`
                   );
-                })}
+                }}
+              >
+                <Ionicons name="information-circle-outline" size={24} color={theme.text} />
+                <Text style={[styles.aboutAccountText, { color: theme.text }]}>About this account</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Section: Who can see your activity */}
+            <View style={styles.privacySection}>
+              <Text style={[styles.privacySectionHeading, { color: theme.text }]}>Who can see your activity</Text>
+
+              {/* Read receipts */}
+              <View style={styles.privacyToggleRow}>
+                <View style={styles.privacyToggleTextCol}>
+                  <Text style={[styles.privacyToggleTitle, { color: theme.text }]}>Read receipts</Text>
+                  <Text style={[styles.privacyToggleSubtitle, { color: theme.subtitle }]}>
+                    Others can see when you've read their messages.
+                  </Text>
+                  <Text style={[styles.privacyToggleFootnote, { color: theme.subtitle }]}>
+                    Disappearing messages always send read receipts.
+                  </Text>
+                </View>
+                <Switch
+                  value={readReceiptsEnabled}
+                  onValueChange={handleToggleReadReceipts}
+                  trackColor={{ false: '#E2E8F0', true: '#0F172A' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {/* Typing indicator */}
+              <View style={[styles.privacyToggleRow, { marginTop: 12 }]}>
+                <View style={styles.privacyToggleTextCol}>
+                  <Text style={[styles.privacyToggleTitle, { color: theme.text }]}>Typing indicator</Text>
+                  <Text style={[styles.privacyToggleSubtitle, { color: theme.subtitle }]}>
+                    Others can see when you're typing.
+                  </Text>
+                </View>
+                <Switch
+                  value={typingIndicatorEnabled}
+                  onValueChange={handleToggleTypingIndicator}
+                  trackColor={{ false: '#E2E8F0', true: '#0F172A' }}
+                  thumbColor="#FFFFFF"
+                />
               </View>
             </View>
-          )}
 
-          {/* Chat Theme Section - Flat Circular Preset Selectors */}
-          {!isAnon && (
-            <>
-              <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionHeader, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>Chat Theme</Text>
+            {/* Section: Who can reach you */}
+            <View style={styles.privacySection}>
+              <Text style={[styles.privacySectionHeading, { color: theme.text }]}>Who can reach you</Text>
+
+              <TouchableOpacity style={styles.privacyActionRow} onPress={handleRestrict}>
+                <Ionicons name="eye-off-outline" size={24} color={theme.text} />
+                <Text style={[styles.privacyActionText, { color: theme.text }]}>Restrict</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.privacyActionRow} onPress={handleBlock}>
+                <Ionicons name="ban-outline" size={24} color={theme.text} />
+                <Text style={[styles.privacyActionText, { color: theme.text }]}>Block</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Section: Support */}
+            <View style={styles.privacySection}>
+              <Text style={[styles.privacySectionHeading, { color: theme.text }]}>Support</Text>
+
+              <TouchableOpacity style={styles.privacyActionRow} onPress={handleReport}>
+                <Ionicons name="warning-outline" size={24} color="#EF4444" />
+                <Text style={[styles.privacyActionText, { color: '#EF4444' }]}>Report</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Real-time Theme Picker Modal */}
+      <Modal
+        visible={themeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setThemeModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setThemeModalVisible(false)}>
+          <View style={[styles.pickerModalCard, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.pickerModalTitle, { color: theme.text }]}>Chat Theme</Text>
             <View style={styles.themeGrid}>
-              {CHAT_THEME_ORDER.map((tid) => {
-                const t = getChatTheme(tid);
-                const active = selectedThemeId === tid;
-                const isCurrentlySaved = themeId === tid;
+              {CHAT_THEME_ORDER.map((tId) => {
+                const tMeta = getChatTheme(tId);
+                const isSelected = currentThemeId === tId;
                 return (
                   <TouchableOpacity
-                    key={tid}
+                    key={tId}
                     style={[
-                      styles.themeCard,
-                      {
-                        backgroundColor: infoSurface,
-                        borderColor: active ? '#9333EA' : infoBorder
-                      }
+                      styles.themeItemCard,
+                      { backgroundColor: tMeta.surface, borderColor: isSelected ? theme.primary : theme.border },
                     ]}
-                    onPress={async () => {
-                      setIsJustApplied(true);
-                      setThemeId(tid);
-                      setSelectedThemeId(tid);
-                      await persist({ theme_id: tid }, { toast: false });
-                      setTimeout(() => {
-                        setIsJustApplied(false);
-                      }, 1000);
-                    }}
-                    activeOpacity={0.7}
+                    onPress={() => handleThemeSelect(tId)}
                   >
-                    <View style={[styles.swatchCircle, { backgroundColor: t.tint, borderColor: tid === 'midnight' ? '#3B3B4F' : '#D1D5DB' }]}>
-                      <View style={[styles.swatchCircleInner, { backgroundColor: t.bubbleOther }]} />
-                    </View>
-                    <Text style={[
-                      styles.themeCardText,
-                      { color: isDark ? '#FFF' : COLORS.text },
-                      active && { fontWeight: '700', color: '#9333EA' }
-                    ]}>
-                      {t.label}
+                    <View style={[styles.themeSwatchPreview, { backgroundColor: tMeta.bubbleOther }]} />
+                    <Text style={[styles.themeItemLabel, { color: isSelected ? theme.primary : theme.text }]}>
+                      {tMeta.label}
                     </Text>
-                    {isCurrentlySaved && <Ionicons name="checkmark-circle" size={16} color="#9333EA" style={styles.checkIndicator} />}
+                    {isSelected && <Ionicons name="checkmark-circle" size={16} color={theme.primary} />}
                   </TouchableOpacity>
                 );
               })}
             </View>
           </View>
+        </Pressable>
+      </Modal>
 
-          {/* Privacy & Customization List - Flat Apple Style */}
-          <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionHeader, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>Preferences & Customization</Text>
-            <View style={[styles.cardBlock, { backgroundColor: infoSurface, borderColor: infoBorder }]}>
-
-              {/* Vanish Mode Option */}
-              <View style={styles.cardRow}>
-                <View style={styles.cardRowLeft}>
-                  <Ionicons name="time-outline" size={20} color={isDark ? '#CCC' : COLORS.text} style={styles.rowIcon} />
-                  <View style={styles.cardTextCol}>
-                    <Text style={[styles.cardTitle, { color: isDark ? '#FFF' : COLORS.text }]}>Vanish Mode</Text>
-                    <Text style={[styles.cardSub, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>
-                      {disappearing === 'on_read' ? 'Disappear after read' : disappearing === '24h' ? 'Disappear after 24 hours' : 'Off'}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Minimal Segmented Selector */}
-              <View style={[styles.segmentedContainer, { backgroundColor: isDark ? '#1E1E2F' : '#F3F4F6' }]}>
-                {([
-                  { key: 'off', label: 'Off' },
-                  { key: 'on_read', label: 'On Read' },
-                  { key: '24h', label: '24 Hours' },
-                ] as const).map(opt => {
-                  const active = disappearing === opt.key;
-                  return (
-                    <TouchableOpacity
-                      key={opt.key}
-                      onPress={() => {
-                        setDisappearing(opt.key);
-                        void persist({
-                          is_disappearing: opt.key === 'off' ? false : opt.key,
-                        }, { toast: false });
-                      }}
-                      style={[
-                        styles.segmentButton,
-                        {
-                          backgroundColor: active
-                            ? (isDark ? '#2E1A47' : '#FFFFFF')
-                            : 'transparent',
-                          borderColor: active && !isDark ? '#E5E7EB' : 'transparent',
-                          borderWidth: active && !isDark ? 1 : 0,
-                        }
-                      ]}
-                    >
-                      <Text style={[
-                        styles.segmentButtonText,
-                        {
-                          fontWeight: active ? '700' : '500',
-                          color: active
-                            ? '#9333EA'
-                            : (isDark ? '#8A8A9E' : COLORS.subtitle)
-                        }
-                      ]}>
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={[styles.cardDivider, { backgroundColor: isDark ? '#2A2A38' : '#E5E7EB' }]} />
-
-              {/* Wallpaper Option */}
-              <View style={styles.cardRow}>
-                <View style={styles.cardRowLeft}>
-                  <Ionicons name="image-outline" size={20} color={isDark ? '#CCC' : COLORS.text} style={styles.rowIcon} />
-                  <View style={styles.cardTextCol}>
-                    <Text style={[styles.cardTitle, { color: isDark ? '#FFF' : COLORS.text }]}>Chat Wallpaper</Text>
-                    <Text style={[styles.cardSub, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>
-                      {wallpaperUrl ? 'Custom wallpaper set' : 'Default chat background'}
-                    </Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.actionPill, { backgroundColor: isDark ? '#2A2A38' : '#F3F4F6' }]}
-                  onPress={pickWallpaper}
-                  disabled={saving}
-                >
-                  <Text style={[styles.actionPillText, { color: isDark ? '#FFF' : COLORS.text }]}>
-                    {wallpaperUrl ? 'Change' : 'Set'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {wallpaperUrl && (
-                <>
-                  <View style={[styles.cardDivider, { backgroundColor: isDark ? '#2A2A38' : '#E5E7EB' }]} />
-                  <TouchableOpacity style={styles.cardRowAction} onPress={clearWallpaper} disabled={saving}>
-                    <Ionicons name="trash-outline" size={18} color={COLORS.error} style={styles.rowIcon} />
-                    <Text style={[styles.cardActionText, { color: COLORS.error }]}>Remove Wallpaper</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-              </View>
-            </View>
-            </>
-          )}
-
-          {/* Account & Safety Actions */}
-          <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionHeader, { color: isDark ? '#8A8A9E' : COLORS.subtitle }]}>Options & Safety</Text>
-            <View style={[styles.cardBlock, { backgroundColor: infoSurface, borderColor: infoBorder }]}>
-
-              {/* Mute Notifications */}
-              <TouchableOpacity
-                style={styles.cardRowAction}
-                onPress={handleMuteToggle}
-                disabled={actionLoading === 'mute'}
-              >
-                {actionLoading === 'mute' ? (
-                  <ActivityIndicator size="small" color={COLORS.text} style={styles.rowIcon} />
-                ) : (
-                  <Ionicons name={isMuted ? "notifications-outline" : "notifications-off-outline"} size={20} color={isDark ? '#CCC' : COLORS.text} style={styles.rowIcon} />
-                )}
-                <Text style={[styles.cardActionText, { color: isDark ? '#FFF' : COLORS.text }]}>
-                  {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
-                </Text>
-              </TouchableOpacity>
-
-              {!isGroup && isFollowing && (
-                <>
-                  <View style={[styles.cardDivider, { backgroundColor: infoBorder }]} />
-                  <TouchableOpacity
-                    style={styles.cardRowAction}
-                    onPress={toggleFollow}
-                    disabled={followLoading}
-                  >
-                    {followLoading ? (
-                      <ActivityIndicator size="small" color={COLORS.error} style={styles.rowIcon} />
-                    ) : (
-                      <Ionicons name="person-remove-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                    )}
-                    <Text style={[styles.cardActionText, { color: COLORS.error }]}>Unfollow {fullName}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {!isGroup && (
-                <>
-                  <View style={[styles.cardDivider, { backgroundColor: infoBorder }]} />
-                  {/* Block User */}
-                  <TouchableOpacity
-                    style={styles.cardRowAction}
-                    onPress={handleBlockToggle}
-                    disabled={actionLoading === 'block'}
-                  >
-                    {actionLoading === 'block' ? (
-                      <ActivityIndicator size="small" color={COLORS.error} style={styles.rowIcon} />
-                    ) : (
-                      <Ionicons name="ban-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                    )}
-                    <Text style={[styles.cardActionText, { color: COLORS.error }]}>
-                      {isBlocked ? 'Unblock User' : 'Block User'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <View style={[styles.cardDivider, { backgroundColor: infoBorder }]} />
-                  {/* Report User */}
-                  <TouchableOpacity
-                    style={styles.cardRowAction}
-                    onPress={handleReport}
-                    disabled={actionLoading === 'report'}
-                  >
-                    {actionLoading === 'report' ? (
-                      <ActivityIndicator size="small" color={COLORS.error} style={styles.rowIcon} />
-                    ) : (
-                      <Ionicons name="flag-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                    )}
-                    <Text style={[styles.cardActionText, { color: COLORS.error }]}>Report User</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-
-          {/* Danger Zone */}
-          <View style={styles.sectionContainer}>
-            <View style={[styles.cardBlock, { backgroundColor: infoSurface, borderColor: infoBorder }]}>
-              <TouchableOpacity style={styles.cardRowAction} onPress={clearHistory}>
-                <Ionicons name="trash-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                <Text style={[styles.cardActionText, { color: COLORS.error, fontWeight: '600' }]}>Clear Chat History</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Group Danger Actions */}
-          {isGroup && (
-            <View style={styles.sectionContainer}>
-              <View style={[styles.cardBlock, { backgroundColor: infoSurface, borderColor: infoBorder }]}>
-                {/* Leave Group */}
-                <TouchableOpacity
-                  style={styles.cardRowAction}
-                  onPress={handleLeaveGroup}
-                >
-                  <Ionicons name="log-out-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                  <Text style={[styles.cardActionText, { color: COLORS.error, fontWeight: '600' }]}>
-                    Leave Group
-                  </Text>
-                </TouchableOpacity>
-
-                {isAdminOfGroup && (
-                  <>
-                    <View style={[styles.cardDivider, { backgroundColor: infoBorder }]} />
-                    {/* Delete Group */}
-                    <TouchableOpacity
-                      style={styles.cardRowAction}
-                      onPress={handleDeleteGroup}
-                    >
-                      <Ionicons name="trash-outline" size={20} color={COLORS.error} style={styles.rowIcon} />
-                      <Text style={[styles.cardActionText, { color: COLORS.error, fontWeight: '600' }]}>
-                        Delete Group
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            </View>
-          )}
-        </ScrollView>
-      )}
-
-      {isJustApplied && (
-        <View style={styles.floatingToastContainer} pointerEvents="none">
-          <BlurView intensity={35} tint="dark" style={styles.floatingToastBlur}>
-            <Ionicons name="checkmark-circle" size={16} color="#10B981" style={{ marginRight: 6 }} />
-            <Text style={styles.floatingToastText}>Applied</Text>
-          </BlurView>
-        </View>
-      )}
-
-      {/* rising preview sheet overlay tray */}
-      {previewThemeId && (() => {
-        const previewT = getChatTheme(previewThemeId);
-        return (
-          <View style={styles.modalOverlay}>
-            <TouchableOpacity
-              style={styles.modalBackdrop}
-              activeOpacity={1}
-              onPress={() => setPreviewThemeId(null)}
-            />
-            <View style={[styles.trayContainer, { backgroundColor: previewT.surface }]}>
-              {/* Drag Handle Indicator */}
-              <View style={[styles.trayHandle, { backgroundColor: previewT.id === 'midnight' ? '#3B3B4F' : '#E5E7EB' }]} />
-
-              <Text style={[styles.trayTitle, { color: previewT.id === 'midnight' ? '#FFF' : COLORS.text }]}>
-                Preview "{previewT.label}" Theme
-              </Text>
-
-              {/* Realistic Mock Chat screen */}
-              <View style={[styles.previewContainer, { backgroundColor: previewT.tint, marginVertical: 16 }]}>
-                {/* Other User Mock Bubble */}
-                <View style={styles.previewRowLeft}>
-                  <View style={[styles.previewAvatarMock, { backgroundColor: previewT.id === 'midnight' ? '#2A2A38' : '#D1D5DB' }]} />
-                  <View style={[styles.previewBubbleOther, { backgroundColor: previewT.bubbleOther }]}>
-                    <Text style={[styles.previewTextOther, { color: previewT.id === 'midnight' ? '#FFF' : '#000' }]}>
-                      Hey! Kaisa lag raha h ye new theme?
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Me Mock Bubble */}
-                <View style={styles.previewRowRight}>
-                  <View style={[
-                    styles.previewBubbleMe,
-                    {
-                      backgroundColor:
-                        previewT.id === 'sunset' ? '#FF5722' :
-                          previewT.id === 'ocean' ? '#0284C7' :
-                            previewT.id === 'forest' ? '#16A34A' :
-                              previewT.id === 'lavender' ? '#8B5CF6' :
-                                previewT.id === 'midnight' ? '#7C3AED' : '#9333EA'
-                    }
-                  ]}>
-                    <Text style={styles.previewTextMe}>
-                      Wow, ye simple look bahut solid h! Apply karo isko.
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Action Buttons Row */}
-              {isJustApplied ? (
-                <View style={styles.appliedSuccessContainer}>
-                  <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                  <Text style={styles.appliedSuccessText}>Applied Successfully!</Text>
-                </View>
-              ) : (
-                <View style={styles.trayActionsRow}>
-                  <TouchableOpacity
-                    style={[styles.trayBtnCancel, { backgroundColor: previewT.id === 'midnight' ? '#2A2A38' : '#F3F4F6' }]}
-                    onPress={() => setPreviewThemeId(null)}
-                  >
-                    <Text style={[styles.trayBtnCancelText, { color: previewT.id === 'midnight' ? '#FFF' : COLORS.text }]}>
-                      Cancel
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.trayBtnApply}
-                    onPress={async () => {
-                      setIsJustApplied(true);
-                      setThemeId(previewThemeId);
-                      setSelectedThemeId(previewThemeId);
-                      await persist({ theme_id: previewThemeId }, { toast: false });
-                      setTimeout(() => {
-                        setIsJustApplied(false);
-                        setPreviewThemeId(null);
-                      }, 700);
-                    }}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <Text style={styles.trayBtnApplyText}>Apply Theme</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        );
-      })()}
-      {/* Edit Group Name Modal */}
+      {/* Real-time Disappearing Messages Modal */}
       <Modal
-        visible={showEditNameModal}
+        visible={disappearingModalVisible}
+        transparent
         animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowEditNameModal(false)}
+        onRequestClose={() => setDisappearingModalVisible(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <View style={{ width: '100%', backgroundColor: infoSurface, borderRadius: 20, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 5 }}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: currentTheme.id === 'midnight' ? '#FFF' : COLORS.text, marginBottom: 16, textAlign: 'center' }}>
-              Edit Group Name
-            </Text>
+        <Pressable style={styles.modalOverlay} onPress={() => setDisappearingModalVisible(false)}>
+          <View style={[styles.pickerModalCard, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.pickerModalTitle, { color: theme.text }]}>Disappearing Messages</Text>
+            {['Off', '24 Hours', '7 Days', '90 Days'].map((duration) => (
+              <TouchableOpacity
+                key={duration}
+                style={[
+                  styles.durationOptionRow,
+                  disappearingDuration === duration && { backgroundColor: `${theme.primary}15` },
+                ]}
+                onPress={() => handleDisappearingSelect(duration)}
+              >
+                <Text
+                  style={[
+                    styles.durationOptionText,
+                    { color: disappearingDuration === duration ? theme.primary : theme.text },
+                  ]}
+                >
+                  {duration}
+                </Text>
+                {disappearingDuration === duration && (
+                  <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
 
+      {/* Real-time Nickname Modal */}
+      <Modal
+        visible={nicknameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNicknameModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setNicknameModalVisible(false)}>
+          <View style={[styles.pickerModalCard, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.pickerModalTitle, { color: theme.text }]}>Set Nickname</Text>
             <TextInput
-              style={{
-                height: 50,
-                borderWidth: 1,
-                borderColor: infoBorder,
-                borderRadius: 12,
-                paddingHorizontal: 16,
-                fontSize: 16,
-                color: currentTheme.id === 'midnight' ? '#FFF' : COLORS.text,
-                backgroundColor: currentTheme.id === 'midnight' ? '#12121A' : '#F9FAFB',
-                marginBottom: 20,
-              }}
-              placeholder="Enter group name..."
-              placeholderTextColor={currentTheme.id === 'midnight' ? '#8A8A9E' : COLORS.subtitle}
-              value={editNameInput}
-              onChangeText={setEditNameInput}
+              style={[
+                styles.nicknameInput,
+                { color: theme.text, borderColor: theme.border, backgroundColor: theme.background },
+              ]}
+              placeholder="Enter custom nickname..."
+              placeholderTextColor={theme.subtitle}
+              value={nicknameInput}
+              onChangeText={setNicknameInput}
               autoFocus
             />
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={styles.nicknameModalActions}>
               <TouchableOpacity
-                onPress={() => setShowEditNameModal(false)}
-                style={{
-                  flex: 1,
-                  paddingVertical: 12,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                  backgroundColor: currentTheme.id === 'midnight' ? '#2A2A38' : '#F3F4F6',
-                }}
+                style={[styles.nicknameBtn, { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: 1 }]}
+                onPress={() => setNicknameModalVisible(false)}
               >
-                <Text style={{ fontSize: 15, fontWeight: '600', color: currentTheme.id === 'midnight' ? '#FFF' : COLORS.text }}>
-                  Cancel
-                </Text>
+                <Text style={{ color: theme.text, fontWeight: '600' }}>Cancel</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
-                onPress={handleSaveGroupName}
-                disabled={updatingGroupName || !editNameInput.trim()}
-                style={{
-                  flex: 2,
-                  backgroundColor: '#9333EA',
-                  paddingVertical: 12,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                }}
+                style={[styles.nicknameBtn, { backgroundColor: theme.primary }]}
+                onPress={handleSaveNickname}
               >
-                {updatingGroupName ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>
-                    Save
-                  </Text>
-                )}
+                <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </Pressable>
       </Modal>
-      <PerformanceOverlay />
+
+      {/* Options Popup Modal (Screenshot 2) */}
+      <Modal
+        visible={optionsMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOptionsMenuVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setOptionsMenuVisible(false)}>
+          <View style={[styles.optionsPopupCard, { backgroundColor: theme.surface }]}>
+            <TouchableOpacity style={[styles.optionsPopupItem, { borderBottomColor: theme.border }]} onPress={handleRestrict}>
+              <Ionicons name="eye-off-outline" size={22} color={theme.text} />
+              <Text style={[styles.optionsPopupItemText, { color: theme.text }]}>Restrict</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.optionsPopupItem, { borderBottomColor: theme.border }]} onPress={handleBlock}>
+              <Ionicons name="ban-outline" size={22} color={theme.text} />
+              <Text style={[styles.optionsPopupItemText, { color: theme.text }]}>Block</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.optionsPopupItem, { borderBottomWidth: 0 }]} onPress={handleReport}>
+              <Ionicons name="warning-outline" size={22} color="#EF4444" />
+              <Text style={[styles.optionsPopupItemText, { color: '#EF4444' }]}>Report</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
+  container: {
+    flex: 1,
+  },
   topBar: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0,
   },
-  backWrap: { padding: 4 },
-  topTitle: { fontSize: 17, fontWeight: '700' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll: { padding: 16, paddingBottom: 60 },
-
-  // Clean Simple Header Card
-  headerCard: {
+  topBarBackBtn: {
+    padding: 4,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  profileSection: {
     alignItems: 'center',
-    paddingVertical: 20,
-    marginBottom: 16,
-  },
-  avatarContainer: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    borderWidth: 1.5,
-    overflow: 'hidden',
-    marginBottom: 12,
+    marginTop: 4,
+    marginBottom: 24,
   },
   profileAvatar: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    marginBottom: 12,
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingHorizontal: 24,
+    letterSpacing: -0.3,
+  },
+  profileSubtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 16,
+    marginBottom: 28,
+  },
+  actionBtnItem: {
+    alignItems: 'center',
+    gap: 6,
+    width: 72,
+  },
+  actionBtnCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  listSection: {
+    paddingHorizontal: 20,
+    gap: 20,
+    marginBottom: 28,
+  },
+  listRowItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 2,
+  },
+  listIconCircleSwatch: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listLeadingIcon: {
+    width: 32,
+    textAlign: 'center',
+  },
+  listTextCol: {
+    flex: 1,
+  },
+  listTitle: {
+    fontSize: 15.5,
+    fontWeight: '600',
+  },
+  listSubtitle: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  bottomTabsContainer: {
+    flexDirection: 'row',
+    borderTopWidth: 0.5,
+    height: 48,
+    marginTop: 8,
+  },
+  bottomTabBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  bottomTabBtnActive: {},
+  activeTabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: '25%',
+    right: '25%',
+    height: 2,
+    borderRadius: 1,
+  },
+  mediaGridContainer: {
+    minHeight: 200,
+  },
+  gridRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+  },
+  gridThumbItem: {
+    width: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE,
+    position: 'relative',
+  },
+  gridThumbImg: {
     width: '100%',
     height: '100%',
   },
-  usernameText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 2,
-    marginBottom: 8,
+  videoBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 3,
+    borderRadius: 4,
   },
-  withTitle: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
-  badgeContainer: {
-    flexDirection: 'row',
+  gridCallThumb: {
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  callThumbText: {
+    fontSize: 11.5,
+    fontWeight: '600',
     marginTop: 4,
+    textAlign: 'center',
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '500',
+  callTimeText: {
+    fontSize: 10,
+    marginTop: 2,
   },
-
-  sectionContainer: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1.0,
-    marginBottom: 8,
-    marginLeft: 6,
-  },
-
-  // Themes
-  themeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  emptyMediaBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
     gap: 8,
   },
-  themeCard: {
-    flex: 1,
-    minWidth: '46%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    position: 'relative',
+  emptyMediaText: {
+    fontSize: 13.5,
   },
-  swatchCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
   },
-  swatchCircleInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  themeCardText: { fontSize: 13, fontWeight: '600' },
-  checkIndicator: {
-    position: 'absolute',
-    right: 12,
-  },
-
-  // Clean Block Cards
-  cardBlock: {
+  optionsPopupCard: {
+    width: 240,
     borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 10,
   },
-  cardRow: {
+  optionsPopupItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  optionsPopupItemText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  pickerModalCard: {
+    width: 300,
+    borderRadius: 20,
+    padding: 20,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  themeGrid: {
+    gap: 10,
+  },
+  themeItemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    gap: 12,
+  },
+  themeSwatchPreview: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  themeItemLabel: {
+    flex: 1,
+    fontSize: 14.5,
+    fontWeight: '600',
+  },
+  durationOptionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
-  },
-  cardRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  rowIcon: {
-    marginRight: 12,
-  },
-  cardTextCol: {
-    flex: 1,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '600', letterSpacing: -0.1 },
-  cardSub: { fontSize: 12, marginTop: 1 },
-  cardDivider: {
-    height: 1,
-    marginLeft: 46,
-  },
-
-  actionPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  actionPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  cardRowAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-  },
-  cardActionText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
-
-  // Minimal Segmented Control
-  segmentedContainer: {
-    flexDirection: 'row',
-    padding: 3,
-    borderRadius: 12,
-    marginHorizontal: 14,
-    marginBottom: 14,
-  },
-  segmentButton: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segmentButtonText: {
-    fontSize: 12,
-  },
-
-  // Live Theme Preview Styles
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    zIndex: 1000,
-  },
-  modalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  trayContainer: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  trayHandle: {
-    width: 36,
-    height: 5,
-    borderRadius: 2.5,
-    alignSelf: 'center',
-    marginBottom: 16,
-  },
-  trayTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  trayActionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-  },
-  trayBtnCancel: {
-    flex: 1,
     paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 4,
   },
-  trayBtnCancelText: {
-    fontSize: 14,
+  durationOptionText: {
+    fontSize: 15,
     fontWeight: '600',
   },
-  trayBtnApply: {
-    flex: 2,
-    backgroundColor: '#9333EA',
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trayBtnApplyText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  previewContainer: {
+  nicknameInput: {
+    borderWidth: 1,
     borderRadius: 12,
-    padding: 12,
-    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    marginBottom: 16,
   },
-  previewRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  previewAvatarMock: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-  },
-  previewBubbleOther: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    borderBottomLeftRadius: 2,
-  },
-  previewTextOther: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  previewRowRight: {
+  nicknameModalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    gap: 10,
   },
-  previewBubbleMe: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    borderBottomRightRadius: 2,
+  nicknameBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
-  previewTextMe: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#FFF',
+
+  // 🛡️ Privacy and Safety Styles (1:1 with Screenshot)
+  privacyContainer: {
+    flex: 1,
   },
-  appliedSuccessContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingVertical: 12,
-    borderRadius: 14,
-    marginTop: 12,
-  },
-  appliedSuccessText: {
-    color: '#10B981',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  floatingToastContainer: {
-    position: 'absolute',
-    bottom: 50,
-    alignSelf: 'center',
-    borderRadius: 20,
-    overflow: 'hidden',
-    zIndex: 9999,
-  },
-  floatingToastBlur: {
+  privacyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingVertical: 12,
+    gap: 16,
   },
-  floatingToastText: {
-    color: '#FFF',
-    fontSize: 14,
+  privacyBackBtn: {
+    padding: 4,
+  },
+  privacyHeaderTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  privacyScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
+  },
+  privacyAccountBlock: {
+    marginBottom: 24,
+  },
+  privacyAccountUsername: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 14,
+  },
+  aboutAccountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  aboutAccountText: {
+    fontSize: 15.5,
+    fontWeight: '500',
+  },
+  privacySection: {
+    marginBottom: 28,
+  },
+  privacySectionHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  privacyToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  privacyToggleTextCol: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  privacyToggleTitle: {
+    fontSize: 15.5,
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  privacyToggleSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  privacyToggleFootnote: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  privacyActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 12,
+  },
+  privacyActionText: {
+    fontSize: 15.5,
+    fontWeight: '500',
   },
 });
-

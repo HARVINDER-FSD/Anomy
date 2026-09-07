@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions, Platform, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/theme/colors';
@@ -142,7 +143,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 0.5,
     borderBottomColor: '#EEE',
-    paddingTop: Platform.OS === 'ios' ? 0 : 10,
+    paddingTop: verticalScale(6),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   backBtn: {
     padding: 5,

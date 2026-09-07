@@ -27,7 +27,6 @@ import LottieView from 'lottie-react-native';
 import { getBaseUrl } from '@/src/api/config';
 import { ShareModal } from '@/components/ShareModal';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
-import { SponsoredShotItem } from '@/components/SponsoredShotItem';
 import { ALL_EMOJIS } from '@/src/constants/all-emojis';
 import { useFollowStatus } from '@/src/hooks/useFollowStatus';
 
@@ -38,7 +37,7 @@ const { width, height } = Dimensions.get('window');
 const VIDEO_HEIGHT = height;
 const AD_INTERVAL = 6;
 
-const groupedEmojis = ALL_EMOJIS.reduce((acc, item) => {
+const groupedEmojis = (ALL_EMOJIS || []).reduce((acc, item) => {
   if (!acc[item.category]) {
     acc[item.category] = [];
   }
@@ -291,22 +290,7 @@ const ReelItem = React.memo(({ item, isVisible, isFocused, router, user, setScro
 
   const videoSource = useMemo(() => {
     let url = item.videoUrl || item.video_url || item.content_url || (item.media_urls && item.media_urls[0]) || (item.media && item.media[0]?.url) || '';
-    if (!url) return 'https://assets.mixkit.co/videos/preview/mixkit-spinning-around-the-earth-in-space-4034-large.mp4';
-
-    if (url.includes('cloudinary.com')) {
-      const uploadIndex = url.indexOf('/upload/');
-      if (uploadIndex !== -1) {
-        const beforeUpload = url.substring(0, uploadIndex + 8);
-        const afterUpload = url.substring(uploadIndex + 8);
-        const versionMatch = afterUpload.match(/v\d+\//);
-        if (versionMatch && versionMatch.index !== undefined) {
-          const versionPart = afterUpload.substring(versionMatch.index);
-          url = `${beforeUpload}f_mp4,q_auto,vc_h264,w_720,c_limit/${versionPart}`;
-        } else {
-          url = url.replace('/upload/', '/upload/f_mp4,q_auto,vc_h264,w_720,c_limit/');
-        }
-      }
-    }
+    if (!url) return '';
     return resolveMediaUrl(url);
   }, [item.videoUrl, item.video_url, item.content_url, item.media_urls, item.media]);
 
@@ -318,18 +302,6 @@ const ReelItem = React.memo(({ item, isVisible, isFocused, router, user, setScro
     const videoUrl = item.videoUrl || item.video_url || item.content_url || (item.media_urls && item.media_urls[0]) || (item.media && item.media[0]?.url) || '';
     if (videoUrl && videoUrl.includes('cloudinary.com')) {
       let thumbUrl = videoUrl.replace(/\.[^/.]+$/, '.jpg');
-      const uploadIndex = thumbUrl.indexOf('/upload/');
-      if (uploadIndex !== -1) {
-        const beforeUpload = thumbUrl.substring(0, uploadIndex + 8);
-        const afterUpload = thumbUrl.substring(uploadIndex + 8);
-        const versionMatch = afterUpload.match(/v\d+\//);
-        if (versionMatch && versionMatch.index !== undefined) {
-          const versionPart = afterUpload.substring(versionMatch.index);
-          thumbUrl = `${beforeUpload}f_auto,q_auto,w_720,so_0,c_limit/${versionPart}`;
-        } else {
-          thumbUrl = thumbUrl.replace('/upload/', '/upload/f_auto,q_auto,w_720,so_0,c_limit/');
-        }
-      }
       return resolveMediaUrl(thumbUrl);
     }
     return '';
@@ -1675,8 +1647,7 @@ export default function ReelDetailScreen() {
             layout.size = height;
           }}
           renderItem={({ item }) => {
-            if (!item) return null;
-            if (item.isAd || item.is_ad) return <SponsoredShotItem ad={item as any} />;
+            if (!item || item.isAd || item.is_ad) return null;
             return (
               <ReelItem
                 item={item}

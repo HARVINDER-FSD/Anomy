@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/src/theme/colors';
@@ -66,7 +67,10 @@ export default function CloseFriendsScreen() {
       paddingVertical: verticalScale(12),
       borderBottomWidth: 0.5,
       borderBottomColor: COLORS.border,
-      paddingTop: Platform.OS === 'ios' ? verticalScale(45) : verticalScale(40),
+      paddingTop: verticalScale(6),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     headerTitle: {
       fontSize: moderateFont(18),
@@ -82,6 +86,9 @@ export default function CloseFriendsScreen() {
     listContent: {
       paddingHorizontal: scale(16),
       paddingTop: verticalScale(16),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     friendRow: {
       flexDirection: 'row',

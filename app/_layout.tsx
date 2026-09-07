@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -9,8 +9,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import Toast from 'react-native-toast-message';
 import { GlobalErrorBoundary } from '@/components/GlobalErrorBoundary';
 
-// Hide native splash immediately — our CustomSplashScreen handles it
-SplashScreen.hideAsync();
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuthStore } from '@/src/store/authStore';
@@ -21,9 +21,27 @@ import { ActiveCallScreen } from '@/src/components/ActiveCallScreen';
 import { NotificationManager } from '@/src/components/NotificationManager';
 
 import { getBaseUrl } from '@/src/api/config';
-import { Platform, Text, TextInput } from 'react-native';
+import { Platform, LogBox } from 'react-native';
+
+LogBox.ignoreLogs([
+  '[expo-av]: Expo AV has been deprecated',
+  'Expo AV has been deprecated',
+  'VideoPlayer.replace loads the asset data synchronously',
+  'Switch to `replaceAsync`',
+]);
+
+// 🔍 Expose all JS errors explicitly
+if (typeof (global as any).ErrorUtils !== 'undefined') {
+  const defaultHandler = (global as any).ErrorUtils.getGlobalHandler();
+  (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+    console.error('🚨 [GLOBAL UNHANDLED ERROR]:', error?.message || error);
+    console.error('🚨 [STACK TRACE]:', error?.stack);
+    if (defaultHandler) {
+      defaultHandler(error, isFatal);
+    }
+  });
+}
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
-import { usePushNotifications } from '@/src/hooks/usePushNotifications';
 import {
   useFonts,
   Outfit_400Regular,
@@ -34,29 +52,6 @@ import {
   Outfit_900Black
 } from '@expo-google-fonts/outfit';
 
-// --- GLOBAL FONT OVERRIDE HACK ---
-const oldTextRender = (Text as any).render;
-if (oldTextRender) {
-  (Text as any).render = function (...args: any[]) {
-    const origin = oldTextRender.call(this, ...args);
-
-    // Map existing font weights to correct font families if we wanted, 
-    // but applying the regular font as a base is sufficient.
-    return React.cloneElement(origin, {
-      style: [{ fontFamily: 'Outfit_500Medium' }, origin.props.style] // Default to medium for a sleek look
-    });
-  };
-}
-const oldTextInputRender = (TextInput as any).render;
-if (oldTextInputRender) {
-  (TextInput as any).render = function (...args: any[]) {
-    const origin = oldTextInputRender.call(this, ...args);
-    return React.cloneElement(origin, {
-      style: [{ fontFamily: 'Outfit_500Medium' }, origin.props.style]
-    });
-  };
-}
-
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
@@ -64,7 +59,6 @@ export default function RootLayout() {
   const { initializeTheme } = useThemeStore();
   const segments = useSegments();
   const router = useSafeRouter();
-  const { expoPushToken } = usePushNotifications();
 
   const [showSplash, setShowSplash] = useState(true);
 
@@ -115,41 +109,45 @@ export default function RootLayout() {
 
 
   useEffect(() => {
-    // Keep splash screen visible for at least 4000ms to allow animation to finish and be clearly seen
+    if (isLoading || !fontsLoaded) return;
+
+    SplashScreen.hideAsync().catch(() => {});
+
     const timer = setTimeout(() => {
       setShowSplash(false);
-    }, 4000);
+    }, 1200);
+
     return () => clearTimeout(timer);
-  }, []);
+  }, [isLoading, fontsLoaded]);
 
-
-
-
-  // Auth guard — redirect to login if not authenticated
-  // Uses a ref to prevent double-navigation on rapid state changes
+  // Auth guard — redirect smoothly without infinite blinking loops
   const redirectingRef = React.useRef(false);
   useEffect(() => {
-    if (isLoading || showSplash) return;
+    if (isLoading || showSplash || !fontsLoaded) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
-      if (redirectingRef.current) return; // Prevent double-redirect
+      if (redirectingRef.current) return;
       redirectingRef.current = true;
       router.replace('/(auth)/login');
-      // Reset after a short delay so future auth changes can trigger again
-      setTimeout(() => { redirectingRef.current = false; }, 1000);
+      setTimeout(() => { redirectingRef.current = false; }, 800);
+    } else if (user && inAuthGroup) {
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      router.replace('/(tabs)');
+      setTimeout(() => { redirectingRef.current = false; }, 800);
     } else {
       redirectingRef.current = false;
     }
-  }, [user, isLoading, showSplash, segments]);
+  }, [user, isLoading, showSplash, fontsLoaded, segments]);
 
   if (isLoading || showSplash || !fontsLoaded) {
     return <CustomSplashScreen />;
   }
 
   return (
-    <>
+    <GlobalErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <NotificationManager>
@@ -164,8 +162,8 @@ export default function RootLayout() {
                   contentStyle: { backgroundColor: colorScheme === 'dark' ? '#000' : '#FFF' },
                 }}
               >
-                <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
                 <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
+                <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
                 <Stack.Screen name="notifications" options={{ animation: 'slide_from_bottom' }} />
                 <Stack.Screen
                   name="chat"
@@ -204,6 +202,6 @@ export default function RootLayout() {
         </ThemeProvider>
       </GestureHandlerRootView>
       <Toast />
-    </>
+    </GlobalErrorBoundary>
   );
 }

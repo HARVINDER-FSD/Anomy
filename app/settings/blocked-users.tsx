@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, SafeAreaView, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/src/store/authStore';
@@ -103,12 +104,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: scale(20), paddingVertical: verticalScale(15), backgroundColor: COLORS.white,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border
+    paddingHorizontal: scale(20), paddingVertical: verticalScale(10), backgroundColor: COLORS.white,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingTop: verticalScale(6),
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   headerTitle: { fontSize: moderateFont(19), fontWeight: 'bold', color: COLORS.text },
   backBtn: { padding: 4 },
-  list: { padding: scale(20) },
+  list: { padding: scale(20), width: '100%', maxWidth: 640, alignSelf: 'center' },
   userItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: COLORS.white, padding: moderateScale(15), borderRadius: moderateScale(18),

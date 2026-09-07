@@ -6,7 +6,7 @@ export default function ChatStackLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        animation: 'simple_push',
+        animation: 'none',
       }}
     />
   );

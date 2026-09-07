@@ -1,5 +1,5 @@
-﻿import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Updates from 'expo-updates';
 
@@ -23,6 +23,9 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('🔥 [GLOBAL ERROR BOUNDARY CAUGHT ERROR]:', error);
+    console.error('🔥 [ERROR STACK]:', error?.stack);
+    console.error('🔥 [COMPONENT STACK]:', errorInfo?.componentStack);
   }
 
   private async handleReload(): Promise<void> {
@@ -38,14 +41,21 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <View style={styles.container}>
-          <Ionicons name="warning-outline" size={64} color="#ff4444" />
-          <Text style={styles.title}>Oops! Something went wrong.</Text>
+          <Ionicons name="warning-outline" size={56} color="#ff4444" />
+          <Text style={styles.title}>Oops! An Error Occurred</Text>
           <Text style={styles.subtitle}>
-            An unexpected error occurred. Please restart the app.
+            An unhandled error was caught by the Error Boundary.
           </Text>
-          {process.env.NODE_ENV === 'development' && (
-            <Text style={styles.errorText}>{this.state.error?.toString()}</Text>
-          )}
+          
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTextTitle}>{this.state.error?.name || 'Error'}: {this.state.error?.message}</Text>
+            {this.state.error?.stack ? (
+              <Text style={styles.errorStack} numberOfLines={8}>
+                {this.state.error.stack}
+              </Text>
+            ) : null}
+          </View>
+
           <TouchableOpacity style={styles.button} onPress={this.handleReload}>
             <Text style={styles.buttonText}>Restart App</Text>
           </TouchableOpacity>
@@ -67,7 +77,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontFamily: 'Outfit-Bold',
+    fontWeight: '700',
     color: '#1a1a1a',
     marginTop: 16,
     marginBottom: 8,
@@ -75,20 +85,31 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    fontFamily: 'Outfit-Regular',
+    fontWeight: '400',
     color: '#666',
     textAlign: 'center',
     marginBottom: 32,
   },
-  errorText: {
-    fontSize: 12,
-    fontFamily: 'Outfit-Regular',
-    color: '#ff4444',
-    textAlign: 'center',
-    marginBottom: 32,
-    backgroundColor: '#ffeeee',
-    padding: 12,
-    borderRadius: 8,
+  errorBox: {
+    width: '100%',
+    backgroundColor: '#FFF0F0',
+    borderColor: '#FFD2D2',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+  },
+  errorTextTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#D32F2F',
+    marginBottom: 6,
+  },
+  errorStack: {
+    fontSize: 11,
+    color: '#7F1D1D',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 16,
   },
   button: {
     backgroundColor: '#2563eb',
@@ -104,6 +125,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontFamily: 'Outfit-Bold',
+    fontWeight: '700',
   },
 });
+

@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Platform, ScrollView, Switch, TextInput, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, ScrollView, Switch, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/src/theme/colors';
@@ -83,7 +84,10 @@ export default function CommentsScreen() {
       paddingVertical: verticalScale(12),
       borderBottomWidth: 0.5,
       borderBottomColor: COLORS.border,
-      paddingTop: Platform.OS === 'ios' ? verticalScale(45) : verticalScale(40),
+      paddingTop: verticalScale(6),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     headerTitle: {
       fontSize: moderateFont(18),
@@ -94,6 +98,9 @@ export default function CommentsScreen() {
     content: {
       paddingHorizontal: scale(20),
       paddingTop: verticalScale(20),
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
     },
     description: {
       fontSize: moderateFont(14),

@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, StyleSheet, Image, TouchableOpacity, StatusBar, Dimensions, FlatList, Alert, Text, Platform } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -58,7 +58,7 @@ export default function MediaViewerScreen() {
 
     setDownloading(true);
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const { status } = await MediaLibrary.requestPermissionsAsync(true, ['photo', 'video']);
       if (status !== 'granted') {
         Alert.alert('Permission Denied', 'We need permission to save photos to your library.');
         return;

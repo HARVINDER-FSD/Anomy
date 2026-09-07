@@ -1,9 +1,10 @@
-﻿import React, { useState, useEffect } from 'react';
-import { 
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  SafeAreaView, Platform, Switch, Alert, ActivityIndicator, 
+import React, { useState, useEffect } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  Platform, Switch, Alert, ActivityIndicator,
   StatusBar, Modal, TextInput, FlatList
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/src/store/authStore';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -30,9 +31,9 @@ export default function SettingsScreen() {
 
   // --- MODALS STATE ---
   const [activeModal, setActiveModal] = useState<string | null>(null); // 'password' | 'email' | 'personal' | 'loginActivity' | 'closeFriends' | 'report' | 'terms' | 'privacy' | 'insights' | 'activity'
-  
 
-  
+
+
 
 
   // --- SETTINGS PREFERENCES STATE ---
@@ -54,8 +55,6 @@ export default function SettingsScreen() {
     sleepMode: false,
     sensitiveFilter: true,
     blockOffensiveComments: true,
-    customFilter: false,
-    filterKeywords: '',
     showSuggestions: true,
     dataSaver: false,
     accountType: user?.account_type || 'personal',
@@ -78,6 +77,7 @@ export default function SettingsScreen() {
           }));
         }
       } catch (error) {
+        console.error("Error fetching settings:", error);
       } finally {
         setLoading(false);
       }
@@ -91,7 +91,7 @@ export default function SettingsScreen() {
         const count = value ? parseInt(value, 10) : 0;
         setSessionTime(count + 5); // Increment dynamically
         await AsyncStorage.setItem('@time_spent_today', String(count + 5));
-      } catch (e) {}
+      } catch (e) { }
     };
     trackTime();
   }, [user?.isAnonymousMode]);
@@ -102,20 +102,19 @@ export default function SettingsScreen() {
     setSettings((prev: any) => ({ ...prev, [key]: value }));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    if (key === 'isAnonymous') {
-      // 🚀 INSTANT: don't await or show loading for anonymous toggle!
-      toggleAnonymousMode();
-      return;
-    }
-
     try {
       setUpdating(true);
-      await apiClient.patch('/settings', { [key]: value });
-      if (key === 'privateAccount' && user) {
-        setAuth({ ...user, is_private: value }, useAuthStore.getState().token || '');
+      if (key === 'isAnonymous') {
+        await toggleAnonymousMode();
+      } else {
+        await apiClient.patch('/settings', { [key]: value });
+        if (key === 'privateAccount' && user) {
+          setAuth({ ...user, is_private: value }, useAuthStore.getState().token || '');
+        }
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
+      console.error(`Error updating setting ${key}:`, error);
       setSettings((prev: any) => ({ ...prev, [key]: previousValue }));
       Alert.alert("Error", "Failed to update preference.");
     } finally {
@@ -132,8 +131,8 @@ export default function SettingsScreen() {
       "Are you sure? You can reactivate your account by logging back in anytime.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Deactivate", 
+        {
+          text: "Deactivate",
           style: "destructive",
           onPress: async () => {
             try {
@@ -158,8 +157,8 @@ export default function SettingsScreen() {
       "WARNING: This will permanently delete your profile, posts, and chats. This action cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete Permanently", 
+        {
+          text: "Delete Permanently",
           style: "destructive",
           onPress: async () => {
             try {
@@ -215,6 +214,7 @@ export default function SettingsScreen() {
       await logout();
       router.replace('/(auth)/login');
     } catch (err) {
+      console.error('Logout error:', err);
     }
   };
 
@@ -224,30 +224,30 @@ export default function SettingsScreen() {
   };
 
   // --- UI COMPONENTS ---
-  const SettingItem = ({ icon, lib = 'Ionicons', title, sub, onPress, settingKey, isDestructive = false }: any) => {
+  const SettingItem = ({ icon, lib = 'Ionicons', title, sub, onPress, settingKey, color = COLORS.text, iconBg = '#F3F4F6', isDestructive = false }: any) => {
     const IconLib: any = lib === 'Material' ? MaterialIcons : lib === 'MaterialCommunity' ? MaterialCommunityIcons : lib === 'FontAwesome' ? FontAwesome5 : Ionicons;
     const value = settingKey ? settings[settingKey] : null;
     const hasToggle = settingKey !== undefined;
 
     return (
-      <TouchableOpacity 
-        style={styles.settingRow} 
-        onPress={() => hasToggle ? updateSetting(settingKey, !value) : onPress?.()} 
+      <TouchableOpacity
+        style={styles.settingRow}
+        onPress={() => hasToggle ? updateSetting(settingKey, !value) : onPress?.()}
         activeOpacity={0.7}
       >
         <View style={styles.settingLeft}>
-          <View style={styles.iconBox}>
-            <IconLib name={icon} size={20} color={isDestructive ? COLORS.error : COLORS.text} />
+          <View style={[styles.iconBox, { backgroundColor: iconBg === '#F3F4F6' ? COLORS.surface : iconBg }]}>
+            <IconLib name={icon} size={18} color={color === COLORS.text ? COLORS.primary : color} />
           </View>
           <View style={styles.settingTextContainer}>
             <Text style={[styles.settingTitle, isDestructive && { color: COLORS.error }]}>{title}</Text>
             {sub && <Text style={styles.settingSub}>{sub}</Text>}
           </View>
         </View>
-        
+
         {hasToggle ? (
-          <Switch 
-            value={value} 
+          <Switch
+            value={value}
             onValueChange={(v) => updateSetting(settingKey, v)}
             trackColor={{ false: '#E5E7EB', true: COLORS.primary + '80' }}
             thumbColor={value ? COLORS.primary : '#F9FAFB'}
@@ -262,7 +262,7 @@ export default function SettingsScreen() {
 
   const SectionHeader = ({ title }: { title: string }) => (
     <View style={styles.sectionHeaderContainer}>
-       <Text style={styles.sectionHeaderText}>{title}</Text>
+      <Text style={styles.sectionHeaderText}>{title}</Text>
     </View>
   );
 
@@ -289,18 +289,18 @@ export default function SettingsScreen() {
         )}
         <Text style={styles.headerTitle}>Settings & Privacy</Text>
         <View style={{ width: 40 }}>
-           {updating && <ActivityIndicator size="small" color={COLORS.primary} />}
+          {updating && <ActivityIndicator size="small" color={COLORS.primary} />}
         </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        
+
         {/* 💳 1. ACCOUNT CENTER */}
         <SectionHeader title="Account Center" />
         <View style={styles.sectionCard}>
           <SettingItem icon="person-outline" title="Personal Details" sub="Name, email, phone number, DOB" onPress={() => router.push('/settings/personal')} />
           <SettingItem icon="shield-checkmark-outline" title="Password Change" onPress={() => router.push('/settings/change-password')} />
-          <SettingItem icon="key-outline" title="Two-Factor Authentication (2FA)" settingKey="twoFactorEnabled" />
+          <SettingItem icon="key-outline" title="Two-Factor Authentication (2FA)" settingKey="twoFactorEnabled" iconBg="#DCFCE7" />
           <SettingItem icon="time-outline" title="Login Activity / History" onPress={() => router.push('/settings/login-activity')} />
           <SettingItem icon="share-social-outline" title="Connected Experiences" sub="Facebook linking & cross-posting" settingKey="dataSaver" />
         </View>
@@ -314,8 +314,7 @@ export default function SettingsScreen() {
         {/* 🔒 3. PRIVACY */}
         <SectionHeader title="Privacy" />
         <View style={styles.sectionCard}>
-          <SettingItem icon="lock-closed-outline" title="Private Account" settingKey="privateAccount" />
-          <SettingItem icon="pulse-outline" title="Show Activity Status" sub="Allow accounts you connect with to see when you are active" settingKey="showOnlineStatus" />
+          <SettingItem icon="lock-closed-outline" title="Private Account" settingKey="privateAccount" iconBg="#DCFCE7" />
           <SettingItem icon="chatbubble-ellipses-outline" title="Comments control" onPress={() => router.push('/settings/comments')} />
           <SettingItem icon="at-outline" title="Tags & Mentions" settingKey="allowMentions" />
           <SettingItem icon="people-outline" title="Close Friends List" onPress={() => router.push('/settings/close-friends')} />
@@ -325,7 +324,7 @@ export default function SettingsScreen() {
         {/* 🔔 4. NOTIFICATIONS */}
         <SectionHeader title="Notifications" />
         <View style={styles.sectionCard}>
-          <SettingItem icon="notifications-outline" title="Push Notifications Master" settingKey="pushEnabled" />
+          <SettingItem icon="notifications-outline" title="Push Notifications Master" settingKey="pushEnabled" iconBg="#FEF3C7" />
           <SettingItem icon="heart-outline" title="Likes & Comments" settingKey="postsStoriesComments" />
           <SettingItem icon="person-add-outline" title="Followers & Following" settingKey="followingFollowers" />
           <SettingItem icon="chatbubble-outline" title="Messages" settingKey="messagesCalls" />
@@ -343,17 +342,17 @@ export default function SettingsScreen() {
         <SectionHeader title="Display & Theme" />
         <View style={styles.sectionCard}>
           <View style={styles.themePillsContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.themePill,
                 themePreference === 'light' && styles.themePillActive
               ]}
               onPress={() => { setThemePreference('light'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
             >
-              <Ionicons 
-                name="sunny-outline" 
-                size={18} 
-                color={themePreference === 'light' ? '#FFFFFF' : COLORS.subtitle} 
+              <Ionicons
+                name="sunny-outline"
+                size={18}
+                color={themePreference === 'light' ? '#FFFFFF' : COLORS.subtitle}
               />
               <Text style={[
                 styles.themePillText,
@@ -361,17 +360,17 @@ export default function SettingsScreen() {
               ]}>Light</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.themePill,
                 themePreference === 'dark' && styles.themePillActive
               ]}
               onPress={() => { setThemePreference('dark'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
             >
-              <Ionicons 
-                name="moon-outline" 
-                size={18} 
-                color={themePreference === 'dark' ? '#FFFFFF' : COLORS.subtitle} 
+              <Ionicons
+                name="moon-outline"
+                size={18}
+                color={themePreference === 'dark' ? '#FFFFFF' : COLORS.subtitle}
               />
               <Text style={[
                 styles.themePillText,
@@ -379,17 +378,17 @@ export default function SettingsScreen() {
               ]}>Dark</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.themePill,
                 themePreference === 'system' && styles.themePillActive
               ]}
               onPress={() => { setThemePreference('system'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
             >
-              <Ionicons 
-                name="hardware-chip-outline" 
-                size={18} 
-                color={themePreference === 'system' ? '#FFFFFF' : COLORS.subtitle} 
+              <Ionicons
+                name="hardware-chip-outline"
+                size={18}
+                color={themePreference === 'system' ? '#FFFFFF' : COLORS.subtitle}
               />
               <Text style={[
                 styles.themePillText,
@@ -404,28 +403,6 @@ export default function SettingsScreen() {
         <View style={styles.sectionCard}>
           <SettingItem icon="image-outline" title="Posts & Reels Shared" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'activity' } })} />
           <SettingItem icon="search-outline" title="Clear Search History" onPress={() => Alert.alert("Search History", "Your search history has been cleared successfully.")} />
-          <SettingItem icon="trash-bin-outline" title="Clear App Cache" onPress={() => {
-            Alert.alert(
-              "Clear App Cache?",
-              "This will clear all stored data on your device (feed, chats, etc.). Your account data will remain on our servers.",
-              [
-                { text: "Cancel", style: "cancel" },
-                { 
-                  text: "Clear Cache", 
-                  style: "destructive", 
-                  onPress: async () => {
-                    try {
-                      await AsyncStorage.clear();
-                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      Alert.alert("Cache Cleared!", "All stored data has been cleared. Please restart the app.");
-                    } catch (e) {
-                      Alert.alert("Error", "Failed to clear cache.");
-                    }
-                  } 
-                }
-              ]
-            );
-          }} />
         </View>
 
         {/* 🛡️ 7. SECURITY */}
@@ -446,7 +423,7 @@ export default function SettingsScreen() {
         <SectionHeader title="Creator Tools" />
         <View style={styles.sectionCard}>
           <SettingItem icon="analytics-outline" title="Insights & Reach Metrics" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'insights' } })} />
-          <SettingItem icon="wallet-outline" title="Monetization & Badges" onPress={() => router.push('/settings/premium')} />
+          <SettingItem icon="wallet-outline" title="Monetization & Badges" onPress={() => router.push('/settings/premium')} iconBg="#FEF3C7" />
         </View>
 
         {/* ⚙️ 10. ACCOUNT CONTROLS */}
@@ -455,7 +432,7 @@ export default function SettingsScreen() {
           <SettingItem icon="git-compare-outline" title="Switch Account Type" sub="Personal / Professional Account" onPress={handleAccountTypeSwitch} />
           <SettingItem icon="cellular-outline" title="Cellular Data Usage" settingKey="dataSaver" />
           <SettingItem icon="remove-circle-outline" title="Temporary Deactivation" onPress={handleDeactivation} />
-          <SettingItem icon="trash-outline" title="Permanent Account Deletion" isDestructive onPress={handleDeletion} />
+          <SettingItem icon="trash-outline" title="Permanent Account Deletion" isDestructive color={COLORS.error} onPress={handleDeletion} />
         </View>
 
         {/* ℹ️ 11. HELP */}
@@ -476,8 +453,8 @@ export default function SettingsScreen() {
         {/* LOGOUT */}
         <View style={{ marginTop: 30, marginBottom: 50 }}>
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-             <Ionicons name="log-out-outline" size={22} color={COLORS.error} />
-             <Text style={styles.logoutText}>Logout from AnuFy</Text>
+            <Ionicons name="log-out-outline" size={22} color={COLORS.error} />
+            <Text style={styles.logoutText}>Logout from AnuFy</Text>
           </TouchableOpacity>
         </View>
 
@@ -488,46 +465,47 @@ export default function SettingsScreen() {
 
 const getStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { 
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    paddingHorizontal: 20, paddingVertical: verticalScale(14), backgroundColor: COLORS.background,
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: verticalScale(10), backgroundColor: COLORS.background,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(55)
+    paddingTop: verticalScale(6),
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   headerTitle: { fontSize: 18, fontFamily: 'Outfit_500Medium', color: COLORS.text },
   verifiedBadge: { marginRight: 8, justifyContent: 'center', alignItems: 'center' },
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 10 },
-  
-  sectionHeaderContainer: { 
+  scrollContent: { paddingHorizontal: 16, paddingTop: 10, width: '100%', maxWidth: 640, alignSelf: 'center' },
+
+  sectionHeaderContainer: {
     paddingHorizontal: 8, marginTop: 24, marginBottom: 12
   },
-  sectionHeaderText: { 
-    fontSize: 12, color: '#6B7280', fontFamily: 'Outfit_500Medium', 
-    textTransform: 'uppercase', letterSpacing: 1.2 
+  sectionHeaderText: {
+    fontSize: 12, color: '#6B7280', fontFamily: 'Outfit_500Medium',
+    textTransform: 'uppercase', letterSpacing: 1.2
   },
-  sectionCard: { 
-    backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden', 
+  sectionCard: {
+    backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden',
     borderWidth: 1, borderColor: COLORS.border
   },
 
-  settingRow: { 
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    paddingHorizontal: 16, paddingVertical: 14, 
+  settingRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: COLORS.border
   },
   settingLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  iconBox: { 
-    width: 24, height: 24, 
-    justifyContent: 'center', alignItems: 'center', marginRight: 14 
+  iconBox: {
+    width: 36, height: 36, borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center', marginRight: 14
   },
   settingTextContainer: { flex: 1 },
   settingTitle: { fontSize: 14, color: COLORS.text, fontFamily: 'Outfit_400Regular' },
   settingSub: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontFamily: 'Outfit_400Regular' },
 
-  logoutBtn: { 
+  logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: COLORS.surface, paddingVertical: 18, borderRadius: 24, 
+    backgroundColor: COLORS.surface, paddingVertical: 18, borderRadius: 24,
     borderWidth: 1, borderColor: '#FEE2E2'
   },
   logoutText: { color: COLORS.error, fontFamily: 'Outfit_500Medium', fontSize: 16 },

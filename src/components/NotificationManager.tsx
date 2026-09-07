@@ -64,6 +64,10 @@ export const NotificationManager = ({ children }: { children: React.ReactNode })
   const { user } = useAuthStore();
   const router = useSafeRouter();
   const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
   const insets = useSafeAreaInsets();
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
@@ -139,10 +143,11 @@ export const NotificationManager = ({ children }: { children: React.ReactNode })
         const senderId = message.sender_id?._id || message.sender_id;
         const isFromMe = senderId === user?.id;
         const convId = message.conversation_id?.toString?.() || message.conversation_id;
+        const currentPath = pathnameRef.current || '';
         const inThisChat =
           typeof convId === 'string' &&
-          pathname.includes('/chat/') &&
-          pathname.includes(convId);
+          currentPath.includes('/chat/') &&
+          currentPath.includes(convId);
 
         if (!isFromMe && !inThisChat) {
           incrementUnreadCount();
@@ -318,7 +323,7 @@ export const NotificationManager = ({ children }: { children: React.ReactNode })
         if (responseListener.current) responseListener.current.remove();
       };
     }
-  }, [user, pathname]);
+  }, [user?.id]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -478,33 +483,35 @@ async function retryAsync<T>(
 
 async function registerForPushNotificationsAsync() {
   let token;
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('messages', {
-      name: 'Messages',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
-  }
-
-  if (Device.isDevice) {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== 'granted') {
-      return;
+  try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('messages', {
+        name: 'Messages',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      }).catch(() => {});
     }
 
-    const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-    const result = await retryAsync(async () => Notifications.getExpoPushTokenAsync({ projectId }));
-    if (result) {
-      token = result.data;
+    if (Device.isDevice) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync().catch(() => ({ status: 'undetermined' }));
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync().catch(() => ({ status: 'denied' }));
+        finalStatus = status;
+      }
+      if (finalStatus !== 'granted') {
+        return undefined;
+      }
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      const result = await retryAsync(async () => Notifications.getExpoPushTokenAsync({ projectId }).catch(() => null));
+      if (result) {
+        token = result.data;
+      }
     }
-  } else {
+  } catch (err) {
+    // Safe fallback
   }
 
   return token;

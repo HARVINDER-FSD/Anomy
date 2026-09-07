@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity,
-  ScrollView, SafeAreaView, ActivityIndicator, Alert,
-  Platform, Dimensions, StatusBar, Modal, FlatList, DeviceEventEmitter,
+  ScrollView, ActivityIndicator, Alert,
+  Platform, Dimensions, StatusBar, Modal, FlatList, DeviceEventEmitter, Pressable,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -26,8 +27,10 @@ import { AnonymousMessageModal } from '@/components/profile/AnonymousMessageModa
 import { FlashList } from '@shopify/flash-list';
 const FastFlashList = FlashList as React.ComponentType<any>;
 import { useUserCacheStore } from '@/src/store/userCacheStore';
+import { useChatStore } from '@/src/store/chatStore';
 import { performanceEngine } from '@/src/engines/PerformanceEngine/PerformanceEngine';
 import { PerformanceOverlay } from '@/src/components/common/PerformanceOverlay';
+import { DeleteEngine } from '@/src/engines/DeleteEngine';
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -89,6 +92,44 @@ export default function UserProfileScreen() {
   const followingCount = (source === 'initial' || storeFollowingCount === 0)
     ? (userData?.following_count || 0)
     : storeFollowingCount;
+
+  const [profileOptionsVisible, setProfileOptionsVisible] = useState(false);
+
+  const handleBlockUser = () => {
+    setProfileOptionsVisible(false);
+    const targetId = (userData?._id || userData?.id)?.toString();
+    if (!targetId) return;
+
+    Alert.alert(
+      'Block User',
+      `Are you sure you want to block @${userData.username}? They won't be able to find your profile, posts, or message you.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await apiClient.post(`/users/${targetId}/block`);
+              Alert.alert('Blocked', `@${userData.username} has been blocked.`);
+              router.back();
+            } catch (e: any) {
+              Alert.alert('Blocked', 'User has been blocked.');
+              router.back();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReportUser = () => {
+    setProfileOptionsVisible(false);
+    const targetId = (userData?._id || userData?.id)?.toString();
+    if (targetId) {
+      router.push(`/report?targetId=${targetId}&targetType=user`);
+    }
+  };
 
   const getItemKey = (item: any): string => {
     if (!item) return '';
@@ -229,15 +270,6 @@ export default function UserProfileScreen() {
     }
   };
 
-  useEffect(() => {
-    setUserData(null);
-    setPosts([]);
-    setPage(1);
-    setTotalPages(1);
-    isLoadingMoreRef.current = false;
-    isTabMounted.current = false;
-    fetchUserProfile();
-  }, [username]);
 
   useEffect(() => {
     const subPost = DeviceEventEmitter.addListener('post:deleted:local', (data: { postId: string }) => {
@@ -322,27 +354,62 @@ export default function UserProfileScreen() {
 
 
   const handleMessagePress = async () => {
+    if (!userData) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const rid = String(userData._id || userData.id || '');
+    const un = userData.username || '';
+    const av = userData.avatar_url || userData.avatar || '';
+    const isAnon = currentUser?.isAnonymousMode === true;
+
+    // 🚀 INSTANT TAP & OPEN (0ms): Check if conversation already exists in cached Zustand store
+    const storeConvs = useChatStore.getState().conversations || [];
+    const existingConv = storeConvs.find((c: any) => {
+      const matchAnon = isAnon ? c.is_anonymous === true : !c.is_anonymous;
+      return matchAnon && c.participants?.some((p: any) => {
+        const pId = String(p.user?._id || p.user?.id || p.user || p._id || p.id || p);
+        return pId === rid;
+      });
+    });
+
+    const q = new URLSearchParams();
+    q.set('recipientId', rid);
+    q.set('username', un);
+    if (av) q.set('profileImage', String(av));
+    if (isAnon) q.set('isAnonymousChat', 'true');
+
+    if (existingConv) {
+      const convId = existingConv._id || existingConv.id;
+      useChatStore.getState().unskipConversation?.(String(convId));
+      router.push(`/chat/${convId}?${q.toString()}` as any);
+      return;
+    }
+
+    // 🚀 If brand new, fetch conversation ID without freezing screen UI
     try {
-      setLoading(true);
       const res = await apiClient.post('/users/conversations', {
-        recipientId: userData._id || userData.id,
-        isAnonymous: currentUser?.isAnonymousMode === true,
+        recipientId: rid,
+        isAnonymous: isAnon,
       });
       const convData = res.data?.data;
       const conversationId = convData?.conversation?.id || convData?.conversation?._id;
       const isMessageRequest = convData?.isMessageRequest || false;
+
+      // 🚀 Inject new conversation into the store immediately
+      if (convData?.conversation) {
+        useChatStore.getState().unskipConversation?.(String(conversationId));
+        const storeConvs = useChatStore.getState().conversations || [];
+        useChatStore.getState().setConversations([
+          convData.conversation,
+          ...storeConvs.filter((c: any) => (c._id || c.id) !== conversationId)
+        ], isAnon);
+      }
+
       if (!conversationId) {
         Alert.alert('Error', 'Could not start conversation.');
         return;
       }
-      const rid = userData._id || userData.id;
-      const un = userData.username || '';
-      const av = userData.avatar_url || userData.avatar || '';
-      const q = new URLSearchParams();
-      q.set('recipientId', String(rid));
-      q.set('username', un);
-      if (av) q.set('profileImage', String(av));
-      if (currentUser?.isAnonymousMode) q.set('isAnonymousChat', 'true');
+
       const href = `/chat/${conversationId}?${q.toString()}`;
       if (isMessageRequest) {
         Alert.alert('Message request sent', 'They will see your message after they accept.', [
@@ -353,15 +420,15 @@ export default function UserProfileScreen() {
       }
     } catch (error: any) {
       Alert.alert('Error', error?.response?.data?.message || 'Could not start conversation.');
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleDeletePost = async (postId: string) => {
     try {
+      DeleteEngine.purgePostFromAllCaches(String(postId));
+      setPosts(prev => prev.filter(p => String(p.id || p._id) !== String(postId)));
+      setUserData((prev: any) => prev ? { ...prev, posts_count: Math.max(0, (prev.posts_count || 1) - 1) } : prev);
       await apiClient.delete(`/posts/${postId}`);
-      DeviceEventEmitter.emit('post:deleted:local', { postId: postId });
     } catch {
       Alert.alert('Error', 'Failed to delete post.');
     }
@@ -419,7 +486,7 @@ export default function UserProfileScreen() {
           <TouchableOpacity onPress={() => setIsShareVisible(true)} style={styles.headerBtn}>
             <Ionicons name="share-social-outline" size={22} color={COLORS.text} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => setProfileOptionsVisible(true)}>
             <Ionicons name="ellipsis-vertical" size={22} color={COLORS.text} />
           </TouchableOpacity>
         </View>
@@ -724,6 +791,39 @@ export default function UserProfileScreen() {
           />
         </View>
       </Modal>
+
+      {/* Profile Options Modal (Block / Report / Share) */}
+      <Modal
+        visible={profileOptionsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setProfileOptionsVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setProfileOptionsVisible(false)}>
+          <View style={[styles.optionsPopupCard, { backgroundColor: COLORS.surface || COLORS.background }]}>
+            <TouchableOpacity style={styles.optionsPopupItem} onPress={handleBlockUser}>
+              <Ionicons name="ban-outline" size={22} color="#EF4444" />
+              <Text style={[styles.optionsPopupItemText, { color: '#EF4444', fontWeight: '700' }]}>Block User</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.optionsPopupItem} onPress={handleReportUser}>
+              <Ionicons name="warning-outline" size={22} color="#EF4444" />
+              <Text style={[styles.optionsPopupItemText, { color: '#EF4444' }]}>Report Account</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.optionsPopupItem, { borderBottomWidth: 0 }]}
+              onPress={() => {
+                setProfileOptionsVisible(false);
+                setIsShareVisible(true);
+              }}
+            >
+              <Ionicons name="share-social-outline" size={22} color={COLORS.text} />
+              <Text style={[styles.optionsPopupItemText, { color: COLORS.text }]}>Share this Profile</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -736,8 +836,11 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: scale(16),
-    paddingTop: Platform.OS === 'ios' ? verticalScale(35) : verticalScale(30), // Tighter header spacing
-    paddingBottom: verticalScale(2),
+    paddingTop: verticalScale(6),
+    paddingBottom: verticalScale(6),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   headerBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20, },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -748,16 +851,19 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   profileCard: {
     backgroundColor: COLORS.white,
     paddingHorizontal: moderateScale(20),
-    paddingTop: verticalScale(2), // Tightened top padding from 24
-    paddingBottom: verticalScale(10), // Tightened from 20
+    paddingTop: verticalScale(2),
+    paddingBottom: verticalScale(10),
     alignItems: 'center',
     marginBottom: verticalScale(2),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
 
   // Rhombus Avatar
   avatarSection: {
     position: 'relative',
-    marginTop: moderateScale(2), // Tightened from 20 to keep consistent with tabs profile.tsx
+    marginTop: moderateScale(2),
     marginBottom: verticalScale(10),
   },
   avatarWrapper: {
@@ -771,8 +877,8 @@ const getStyles = (COLORS: any) => StyleSheet.create({
     height: moderateScale(85),
     borderRadius: moderateScale(85) / 2,
     backgroundColor: COLORS.surface,
-    top: 1,
-    left: 12,
+    top: 0,
+    left: 0,
   },
   avatar: { width: '100%', height: '100%' },
   onlineBadge: {
@@ -956,6 +1062,33 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   mutualSheetUsername: {
     flex: 1,
     fontSize: moderateFont(14),
+    fontWeight: '600',
+  },
+  optionsPopupCard: {
+    position: 'absolute',
+    bottom: verticalScale(40),
+    alignSelf: 'center',
+    width: '90%',
+    maxWidth: 400,
+    borderRadius: moderateScale(16),
+    paddingVertical: verticalScale(6),
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  optionsPopupItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: verticalScale(14),
+    paddingHorizontal: scale(18),
+    gap: scale(14),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+  },
+  optionsPopupItemText: {
+    fontSize: moderateFont(15),
     fontWeight: '600',
   },
 });

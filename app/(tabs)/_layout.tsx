@@ -25,6 +25,9 @@ export const MaterialTopTabs = withLayoutContext<
 
 function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnabled }: any) {
   const currentRoute = state.routes[state.index]?.name;
+  if (currentRoute === 'create') {
+    return null;
+  }
   const COLORS = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -135,20 +138,18 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
 
 export default function TabLayout() {
   const COLORS = useAppTheme();
+  const router = useSafeRouter();
   const { user } = useAuthStore();
   const isAnonymous = !!user?.isAnonymousMode;
-  const router = useSafeRouter();
-  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount);
-  const fetchUnreadNotificationsCount = useNotificationStore((s) => s.fetchUnreadNotificationsCount);
   const [animationEnabled, setAnimationEnabled] = React.useState(true);
   const navigationRef = React.useRef<any>(null);
 
   useEffect(() => {
     if (user?.id) {
-      void fetchUnreadCount();
-      void fetchUnreadNotificationsCount();
+      void useNotificationStore.getState().fetchUnreadCount();
+      void useNotificationStore.getState().fetchUnreadNotificationsCount();
     }
-  }, [user?.id, fetchUnreadCount, fetchUnreadNotificationsCount]);
+  }, [user?.id]);
 
   // Smart route preservation on mode switch
   const prevAnonRef = React.useRef(isAnonymous);
@@ -196,9 +197,9 @@ export default function TabLayout() {
           tabBarShowLabel: false,
           tabBarIndicatorStyle: { height: 0 },
           tabBarPressColor: 'transparent',
-          animationEnabled: animationEnabled,
+          animationEnabled: false,
           swipeEnabled: true,
-          lazy: false,
+          lazy: true,
         }}>
         {/* ✅ NORMAL MODE: Create (Left of Home) ↔ Home ↔ Shots ↔ Messages ↔ Profile */}
         {/* ✅ ANONYMOUS MODE: Feed ↔ Search ↔ Messages ↔ Profile (Shots & Create 100% Disabled/Hidden) */}

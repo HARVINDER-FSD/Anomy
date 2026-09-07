@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   Image,
   Animated,
-  SafeAreaView,
   StatusBar,
   Platform,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { apiClient } from '@/src/api/client';
@@ -293,11 +293,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: scale(16),
-    paddingTop: Platform.OS === 'ios' ? verticalScale(8) : verticalScale(40),
-    paddingBottom: verticalScale(12),
+    paddingTop: verticalScale(6),
+    paddingBottom: verticalScale(10),
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
     backgroundColor: COLORS.white,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   backBtn: {
     width: scale(32),
@@ -316,6 +319,9 @@ const styles = StyleSheet.create({
   subtitleContainer: {
     paddingHorizontal: scale(16),
     paddingVertical: verticalScale(12),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   subtitleBanner: {
     flexDirection: 'row',
@@ -334,6 +340,9 @@ const styles = StyleSheet.create({
   // List
   listContentContainer: {
     paddingBottom: verticalScale(100),
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   separator: {
     height: 1,

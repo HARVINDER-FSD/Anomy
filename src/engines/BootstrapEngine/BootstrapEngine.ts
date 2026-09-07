@@ -13,7 +13,6 @@ import { FeatureFlagEngine } from '../FeatureFlagEngine';
 import { PermissionEngine } from '../PermissionEngine';
 import { BackgroundTaskEngine } from '../BackgroundTaskEngine';
 import { CallEngine } from '../CallEngine';
-import { AdEngine } from '../AdEngine';
 import { Logger } from '../../shared/Logger';
 
 export class BootstrapEngineClass extends BaseEngine {
@@ -39,7 +38,6 @@ export class BootstrapEngineClass extends BaseEngine {
     EngineManager.register(PermissionEngine);
     EngineManager.register(BackgroundTaskEngine);
     EngineManager.register(CallEngine);
-    EngineManager.register(AdEngine);
 
     // 3. Initialize all registered engines
     await EngineManager.initializeAll(this.context);

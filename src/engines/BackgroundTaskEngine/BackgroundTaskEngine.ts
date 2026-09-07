@@ -1,5 +1,6 @@
 import { BaseEngine } from '../shared/BaseEngine';
 import { SyncEngine } from '../../shared/SyncEngine';
+import { OfflineQueue } from '../../shared/OfflineQueue';
 import { Logger } from '../../shared/Logger';
 
 export class BackgroundTaskEngineClass extends BaseEngine {
@@ -7,12 +8,14 @@ export class BackgroundTaskEngineClass extends BaseEngine {
   private syncTimer: any = null;
 
   protected async onInitialize(): Promise<void> {
-    // Schedule periodic background sync every 60 seconds
+    // Schedule periodic background sync every 60 seconds (only if queue has items)
     this.syncTimer = setInterval(() => {
-      Logger.debug(this.name, 'Running periodic background sync...');
-      SyncEngine.sync().catch((err) => {
-        Logger.error(this.name, 'Periodic sync error:', err);
-      });
+      try {
+        const queue = OfflineQueue.getQueue();
+        if (queue && queue.length > 0) {
+          SyncEngine.sync().catch(() => {});
+        }
+      } catch (_) {}
     }, 60000);
   }
 

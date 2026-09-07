@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, SafeAreaView, ActivityIndicator, Alert, Image, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Image, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -220,14 +221,15 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.white },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: scale(20), paddingBottom: verticalScale(15), borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : verticalScale(45),
-    backgroundColor: COLORS.white
+    paddingHorizontal: scale(20), paddingBottom: verticalScale(10), borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingTop: verticalScale(6),
+    backgroundColor: COLORS.white,
+    width: '100%', maxWidth: 640, alignSelf: 'center'
   },
   headerTitle: { fontSize: moderateFont(18), fontWeight: 'bold', color: COLORS.text },
   saveBtn: { color: COLORS.secondary, fontWeight: 'bold', fontSize: moderateFont(16) },
 
-  content: { padding: 20 },
+  content: { padding: 20, width: '100%', maxWidth: 640, alignSelf: 'center' },
   avatarSection: { alignItems: 'center', marginBottom: 25 },
   avatarContainer: {
     width: 90,
