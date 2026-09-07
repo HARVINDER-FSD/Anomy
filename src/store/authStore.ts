@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { socketService } from '../lib/socket';
@@ -69,9 +69,20 @@ export const useAuthStore = create<AuthState>((set) => ({
       } catch (_) {}
     }
 
+    const seed = user?.username || user?.id || (user as any)?._id || 'ghost';
+    const coolNames = ['CyberGhost', 'NeonShadow', 'MidnightFox', 'SilentOracle', 'PhantomVibe', 'EchoRaven', 'VelvetMonk', 'AstralDrifter', 'NovaPulse', 'ZenRebel'];
+    const randomName = coolNames[Math.floor(Math.random() * coolNames.length)] + '#' + Math.floor(100 + Math.random() * 900);
+
+    const persona = user?.anonymousPersona || (current && String(current.id || current._id) === String(user?.id || user?._id) ? current.anonymousPersona : {
+      name: randomName,
+      username: randomName.toLowerCase().replace('#', '_'),
+      avatar: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(seed)}`,
+    });
+
     const finalUser = user ? {
       ...user,
-      anonymousPersona: user.anonymousPersona || (current && String(current.id || current._id) === String(user.id || user._id) ? current.anonymousPersona : undefined)
+      isAnonymousMode: true,
+      anonymousPersona: persona
     } : user;
 
     // Update state FIRST for instant UI update!
@@ -141,7 +152,20 @@ export const useAuthStore = create<AuthState>((set) => ({
       const userStr = await AsyncStorage.getItem('auth-user');
 
       if (token && userStr) {
-        const localUser = JSON.parse(userStr);
+        const parsed = JSON.parse(userStr);
+        const seed = parsed?.username || parsed?.id || (parsed as any)?._id || 'ghost';
+        const coolNames = ['CyberGhost', 'NeonShadow', 'MidnightFox', 'SilentOracle', 'PhantomVibe', 'EchoRaven', 'VelvetMonk', 'AstralDrifter', 'NovaPulse', 'ZenRebel'];
+        const randomName = coolNames[Math.floor(Math.random() * coolNames.length)] + '#' + Math.floor(100 + Math.random() * 900);
+
+        const localUser = {
+          ...parsed,
+          isAnonymousMode: true,
+          anonymousPersona: parsed.anonymousPersona || {
+            name: randomName,
+            username: randomName.toLowerCase().replace('#', '_'),
+            avatar: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(seed)}`,
+          }
+        };
         // ✅ Instantly set user from local cache — no waiting
         set({ user: localUser, token, isLoading: false });
         socketService.connect(token);

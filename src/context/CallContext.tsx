@@ -3,6 +3,7 @@ import { socketService } from '@/src/lib/socket';
 import { useAuthStore } from '@/src/store/authStore';
 import { Alert, Vibration, Platform } from 'react-native';
 import { Camera } from 'expo-camera';
+import { Audio } from 'expo-av';
 
 // 🚀 Safe expo-audio Imports (With dev fallback if native build pending)
 let createAudioPlayer: any = (asset: any) => ({
@@ -166,7 +167,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const pc = useRef<any>(null); // Using any for WebRTC classes to avoid complex type issues with mocks
   const localStreamRef = useRef<any>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<any>(null);
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callStateRef = useRef<CallState>(callState);
   const iceCandidatesQueue = useRef<any[]>([]);

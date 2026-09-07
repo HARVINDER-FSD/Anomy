@@ -27,6 +27,7 @@ import * as Clipboard from 'expo-clipboard';
 import { FlashList } from '@shopify/flash-list';
 import LottieView from 'lottie-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
 
 // Store & Theme & Socket Engine Imports
 import { useAppTheme } from '@/src/theme/colors';

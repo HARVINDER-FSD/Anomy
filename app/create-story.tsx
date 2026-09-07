@@ -16,6 +16,7 @@ import Svg, { Path, G as SvgGroup } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { Audio } from 'expo-av';
 import { scale, verticalScale } from '@/src/utils/responsive';
 
 interface CreateStoryVideoItemProps {
@@ -360,7 +361,7 @@ export default function AnuFyNeonEditorPro() {
   const [trendingSongs, setTrendingSongs] = useState<any[]>([]);
   const [recentSongs, setRecentSongs] = useState<any[]>([]);
   const [isLoadingMusic, setIsLoadingMusic] = useState(false);
-  const storyAudioRef = useRef<ExpoAV.Audio.Sound | null>(null);
+  const storyAudioRef = useRef<Audio.Sound | null>(null);
   const musicReqId = useRef(0);
   const [themeIdx, setThemeIdx] = useState(0);
 
@@ -483,7 +484,7 @@ export default function AnuFyNeonEditorPro() {
       }
 
       try {
-        const { sound } = await ExpoAV.Audio.Sound.createAsync(
+        const { sound } = await Audio.Sound.createAsync(
           { uri: previewUrl }, 
           { shouldPlay: true, isLooping: true }
         );
@@ -655,7 +656,7 @@ export default function AnuFyNeonEditorPro() {
                         const currentId = musicReqId.current;
                         try {
                             if (storyAudioRef.current) { await storyAudioRef.current.unloadAsync(); }
-                            const { sound } = await ExpoAV.Audio.Sound.createAsync(
+                            const { sound } = await Audio.Sound.createAsync(
                                 { uri: originalMusic.previewUrl },
                                 { shouldPlay: true, isLooping: true }
                             );

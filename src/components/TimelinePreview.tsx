@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { View, StyleSheet, Dimensions, Text, Image, TouchableOpacity, PanResponder, Animated } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useEditorStore, EditorLayer } from '../store/editorStore';
 import { COLORS } from '../theme/colors';
@@ -89,6 +90,9 @@ export const TimelinePreview: React.FC = () => {
     }
   }, [isPlaying, currentTime, activeClip, player, totalDuration]);
 
+  const soundObject = useRef<Audio.Sound | null>(null);
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+
   // 🎵 SYNC MUSIC PLAYBACK (v2.0 - HARDENED)
   useEffect(() => {
     let soundObj: Audio.Sound | null = null;
@@ -120,8 +124,6 @@ export const TimelinePreview: React.FC = () => {
       }
     };
   }, [activeMusic?.url]);
-
-  const soundObject = useRef<Audio.Sound | null>(null);
 
   // Handle Play/Pause sync for existing music
   useEffect(() => {

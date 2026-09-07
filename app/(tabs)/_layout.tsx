@@ -54,16 +54,12 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
 
   const displayUnread = Math.max(unreadMessagesCount || 0, totalUnreadFromChats);
 
-  const bottomTabs = isAnonymous ? [
-    { name: 'index', icon: 'home', outline: 'home-outline', label: 'Home', lib: 'Ionicons' },
-    { name: 'explore', icon: 'search', outline: 'search-outline', label: 'Search', lib: 'Ionicons' },
-    { name: 'messages', icon: 'chatbubble', outline: 'chatbubble-outline', label: 'Chat', lib: 'Ionicons' },
-    { name: 'profile', icon: 'person', outline: 'person-outline', label: 'Profile', lib: 'Ionicons' },
-  ] : [
-    { name: 'index', icon: 'home', outline: 'home-outline', label: 'Home', lib: 'Ionicons' },
-    { name: 'shots', icon: 'play-circle', outline: 'play-circle-outline', label: 'Shots', lib: 'Ionicons' },
-    { name: 'messages', icon: 'chatbubble', outline: 'chatbubble-outline', label: 'Chat', lib: 'Ionicons' },
-    { name: 'profile', icon: 'person', outline: 'person-outline', label: 'Profile', lib: 'Ionicons' },
+  const bottomTabs = [
+    { name: 'index', icon: 'flame', outline: 'flame-outline', label: 'Vibes', lib: 'Ionicons' },
+    { name: 'explore', icon: 'flash', outline: 'flash-outline', label: 'Match ⚡', lib: 'Ionicons' },
+    { name: 'create', icon: 'add', outline: 'add', label: 'Drop', isCenterBtn: true, lib: 'Ionicons' },
+    { name: 'messages', icon: 'chatbubbles', outline: 'chatbubbles-outline', label: 'Chats', lib: 'Ionicons' },
+    { name: 'profile', icon: 'person', outline: 'person-outline', label: 'Persona', lib: 'Ionicons' },
   ];
 
   const handleTabPress = (tabName: string) => {
@@ -74,17 +70,31 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
     }, 100);
   };
 
-  const isShots = currentRoute === 'shots';
-  const activeColor = isShots ? '#FFF' : COLORS.secondary;
-  const inactiveColor = isShots ? 'rgba(255,255,255,0.5)' : COLORS.subtitle;
-  const bgColor = isShots ? '#000000' : COLORS.white;
+  const activeColor = '#A855F7'; // Neon Purple / Violet Glow
+  const inactiveColor = '#71717A'; // Muted Zinc
+  const bgColor = '#09090B'; // Deep Pure Dark Surface
 
   return (
     <View style={[styles.tabBarContainer, { backgroundColor: bgColor }]}>
-      <View style={[styles.tabBar, { backgroundColor: bgColor, borderTopColor: isShots ? 'rgba(255,255,255,0.15)' : (isAnonymous ? '#F0F0F0' : COLORS.border) }]}>
+      <View style={[styles.tabBar, { backgroundColor: bgColor, borderTopColor: 'rgba(255,255,255,0.08)' }]}>
         {bottomTabs.map((tab: any) => {
           const isFocused = state.routes[state.index]?.name === tab.name;
           const IconLib = tab.lib === 'MaterialCommunityIcons' ? MaterialCommunityIcons : Ionicons;
+
+          if (tab.isCenterBtn) {
+            return (
+              <TouchableOpacity
+                key={tab.name}
+                onPress={() => handleTabPress(tab.name)}
+                style={styles.centerTabItem}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.centerTabBtn, { backgroundColor: '#9333EA', borderColor: '#09090B' }]}>
+                  <Ionicons name="add" size={28} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            );
+          }
 
           return (
             <TouchableOpacity
@@ -103,20 +113,20 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
                   alignItems: 'center',
                 }}>
                   <Image
-                    source={{ uri: resolveAvatarUrl(tab.name === 'profile' && isAnonymous ? (user as any)?.anonymousPersona?.avatar : user?.avatar_url || user?.avatar, user?.username, isAnonymous) }}
+                    source={{ uri: resolveAvatarUrl((user as any)?.anonymousPersona?.avatar, user?.username, true) }}
                     style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 14,
+                      width: 26,
+                      height: 26,
+                      borderRadius: 13,
                       opacity: isFocused ? 1 : 0.8,
                     }}
                   />
                 </View>
               ) : (
-                <View>
+                <View style={{ alignItems: 'center' }}>
                   <IconLib
                     name={(isFocused ? tab.icon : tab.outline) as any}
-                    size={tab.name === 'shots' ? 32 : 26}
+                    size={24}
                     color={isFocused ? activeColor : inactiveColor}
                   />
                   {tab.name === 'messages' && displayUnread > 0 && (
@@ -140,7 +150,6 @@ export default function TabLayout() {
   const COLORS = useAppTheme();
   const router = useSafeRouter();
   const { user } = useAuthStore();
-  const isAnonymous = !!user?.isAnonymousMode;
   const [animationEnabled, setAnimationEnabled] = React.useState(true);
   const navigationRef = React.useRef<any>(null);
 
@@ -151,49 +160,17 @@ export default function TabLayout() {
     }
   }, [user?.id]);
 
-  // Smart route preservation on mode switch
-  const prevAnonRef = React.useRef(isAnonymous);
-  useEffect(() => {
-    if (prevAnonRef.current !== isAnonymous) {
-      prevAnonRef.current = isAnonymous;
-      const doJump = () => {
-        if (navigationRef.current) {
-          try {
-            const state = navigationRef.current.getState();
-            const currentRouteName = state?.routes[state?.index]?.name;
-            
-            let targetRoute = currentRouteName;
-            if (isAnonymous && currentRouteName === 'shots') {
-              targetRoute = 'index';
-            } else if (!isAnonymous && currentRouteName === 'explore') {
-              targetRoute = 'index';
-            }
-            if (!targetRoute) targetRoute = 'profile';
-
-            navigationRef.current.dispatch(TabActions.jumpTo(targetRoute));
-          } catch (_) {
-            try {
-              navigationRef.current.dispatch(TabActions.jumpTo('profile'));
-            } catch (__) {}
-          }
-        }
-      };
-      doJump();
-      setTimeout(doJump, 50);
-    }
-  }, [isAnonymous]);
-
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+    <View style={{ flex: 1, backgroundColor: '#09090B' }}>
       <MaterialTopTabs
-        key={isAnonymous ? 'anon-tabs' : 'normal-tabs'}
+        key="pure-anon-tabs"
         ref={navigationRef}
         tabBarPosition="bottom"
         tabBar={(props) => <CustomTabBar {...props} router={router} setAnimationEnabled={setAnimationEnabled} />}
         initialRouteName="index"
         screenOptions={{
-          tabBarActiveTintColor: COLORS.secondary,
-          tabBarInactiveTintColor: COLORS.subtitle,
+          tabBarActiveTintColor: '#A855F7',
+          tabBarInactiveTintColor: '#71717A',
           tabBarShowLabel: false,
           tabBarIndicatorStyle: { height: 0 },
           tabBarPressColor: 'transparent',
@@ -201,23 +178,12 @@ export default function TabLayout() {
           swipeEnabled: true,
           lazy: true,
         }}>
-        {/* ✅ NORMAL MODE: Create (Left of Home) ↔ Home ↔ Shots ↔ Messages ↔ Profile */}
-        {/* ✅ ANONYMOUS MODE: Feed ↔ Search ↔ Messages ↔ Profile (Shots & Create 100% Disabled/Hidden) */}
-        {!isAnonymous ? [
-          <MaterialTopTabs.Screen key="explore" name="explore" options={{ tabBarItemStyle: { display: 'none' }, swipeEnabled: false }} />,
-          <MaterialTopTabs.Screen key="create" name="create" options={{ title: 'Create', tabBarItemStyle: { display: 'none' }, swipeEnabled: true }} />,
-          <MaterialTopTabs.Screen key="index" name="index" options={{ title: 'Home' }} />,
-          <MaterialTopTabs.Screen key="shots" name="shots" options={{ title: 'Shots' }} />,
-          <MaterialTopTabs.Screen key="messages" name="messages" options={{ title: 'Messages', lazy: false }} />,
-          <MaterialTopTabs.Screen key="profile" name="profile" options={{ title: 'Profile' }} />,
-        ] : [
-          <MaterialTopTabs.Screen key="shots" name="shots" options={{ tabBarItemStyle: { display: 'none' }, swipeEnabled: false }} />,
-          <MaterialTopTabs.Screen key="create" name="create" options={{ tabBarItemStyle: { display: 'none' }, swipeEnabled: false }} />,
-          <MaterialTopTabs.Screen key="index" name="index" options={{ title: 'Feed' }} />,
-          <MaterialTopTabs.Screen key="explore" name="explore" options={{ title: 'Search' }} />,
-          <MaterialTopTabs.Screen key="messages" name="messages" options={{ title: 'Messages', lazy: false }} />,
-          <MaterialTopTabs.Screen key="profile" name="profile" options={{ title: 'Profile' }} />,
-        ]}
+        <MaterialTopTabs.Screen key="index" name="index" options={{ title: 'Vibes' }} />
+        <MaterialTopTabs.Screen key="explore" name="explore" options={{ title: 'Match ⚡' }} />
+        <MaterialTopTabs.Screen key="create" name="create" options={{ title: 'Drop ➕' }} />
+        <MaterialTopTabs.Screen key="messages" name="messages" options={{ title: 'Chats', lazy: false }} />
+        <MaterialTopTabs.Screen key="profile" name="profile" options={{ title: 'Persona' }} />
+        <MaterialTopTabs.Screen key="shots" name="shots" options={{ tabBarItemStyle: { display: 'none' }, swipeEnabled: false }} />
       </MaterialTopTabs>
     </View>
   );
@@ -266,6 +232,14 @@ const getStyles = (COLORS: any, insets: { bottom: number; left: number; right: n
       height: TAB_ICON_AREA,
       minWidth: 44,
       zIndex: 12,
+    },
+    centerTabItem: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: TAB_ICON_AREA,
+      minWidth: 44,
+      zIndex: 13,
     },
     centerTabBtn: {
       width: 54,

@@ -14,6 +14,7 @@ import { resolveAvatarUrl, resolveMediaUrl } from '@/src/utils/imageUtils';
 import { moderateFont, scale, verticalScale } from '@/src/utils/responsive';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEvent } from 'expo';
+import { Audio } from 'expo-av';
 import Svg, { Path, G as SvgGroup } from 'react-native-svg';
 import { useAuthStore } from '@/src/store/authStore';
 import { BlurView } from 'expo-blur';
