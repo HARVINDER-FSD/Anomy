@@ -70,13 +70,14 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
     }, 100);
   };
 
-  const activeColor = '#A855F7'; // Neon Purple / Violet Glow
-  const inactiveColor = '#71717A'; // Muted Zinc
-  const bgColor = '#09090B'; // Deep Pure Dark Surface
+  const activeColor = COLORS.primary;
+  const inactiveColor = COLORS.subtitle;
+  const bgColor = (COLORS as any).tabBarBg || COLORS.surface;
+  const borderColor = (COLORS as any).tabBarBorder || COLORS.border;
 
   return (
     <View style={[styles.tabBarContainer, { backgroundColor: bgColor }]}>
-      <View style={[styles.tabBar, { backgroundColor: bgColor, borderTopColor: 'rgba(255,255,255,0.08)' }]}>
+      <View style={[styles.tabBar, { backgroundColor: bgColor, borderTopColor: borderColor }]}>
         {bottomTabs.map((tab: any) => {
           const isFocused = state.routes[state.index]?.name === tab.name;
           const IconLib = tab.lib === 'MaterialCommunityIcons' ? MaterialCommunityIcons : Ionicons;
@@ -89,7 +90,7 @@ function CustomTabBar({ state, descriptors, navigation, router, setAnimationEnab
                 style={styles.centerTabItem}
                 activeOpacity={0.8}
               >
-                <View style={[styles.centerTabBtn, { backgroundColor: '#9333EA', borderColor: '#09090B' }]}>
+                <View style={[styles.centerTabBtn, { backgroundColor: COLORS.primary, borderColor: bgColor }]}>
                   <Ionicons name="add" size={28} color="#FFFFFF" />
                 </View>
               </TouchableOpacity>
@@ -161,7 +162,7 @@ export default function TabLayout() {
   }, [user?.id]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#09090B' }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       <MaterialTopTabs
         key="pure-anon-tabs"
         ref={navigationRef}
@@ -169,8 +170,8 @@ export default function TabLayout() {
         tabBar={(props) => <CustomTabBar {...props} router={router} setAnimationEnabled={setAnimationEnabled} />}
         initialRouteName="index"
         screenOptions={{
-          tabBarActiveTintColor: '#A855F7',
-          tabBarInactiveTintColor: '#71717A',
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.subtitle,
           tabBarShowLabel: false,
           tabBarIndicatorStyle: { height: 0 },
           tabBarPressColor: 'transparent',

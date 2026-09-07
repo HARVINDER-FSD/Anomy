@@ -502,9 +502,9 @@ export default function ProfileScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.bg }]}>
       <StatusBar barStyle={COLORS.background === '#121212' ? 'light-content' : 'dark-content'} />
 
-      {/* Slim Header - settings icon only */}
+      {/* Header - settings icon opens full settings */}
       <View style={[styles.header, { backgroundColor: themeColors.bg, borderBottomColor: 'transparent', alignItems: 'flex-end', width: '100%' }]}>
-        <TouchableOpacity onPress={() => router.push(isAnonymous ? '/settings/anonymous' : '/settings')} hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}>
+        <TouchableOpacity onPress={() => router.push('/settings')} hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}>
           <MaterialCommunityIcons name="cog-outline" size={28} color={themeColors.text} />
         </TouchableOpacity>
       </View>

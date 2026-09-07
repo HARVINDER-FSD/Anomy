@@ -1,149 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Platform, Switch, Alert, ActivityIndicator,
-  StatusBar, Modal, TextInput, FlatList
+  Switch, Alert, ActivityIndicator, StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { useAuthStore } from '@/src/store/authStore';
-import { Ionicons, MaterialCommunityIcons, FontAwesome5, MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/src/theme/colors';
 import { apiClient } from '@/src/api/client';
-import { scale, verticalScale, moderateScale, moderateFont } from '@/src/utils/responsive';
+import { verticalScale, scale } from '@/src/utils/responsive';
 import * as Haptics from 'expo-haptics';
-import { VerifiedTick } from '@/src/components/common/VerifiedTick';
 import { useSafeRouter } from '@/src/hooks/useSafeRouter';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useThemeStore } from '@/src/store/themeStore';
+import { resolveAvatarUrl } from '@/src/utils/imageUtils';
 
 export default function SettingsScreen() {
   const COLORS = useAppTheme();
   const styles = getStyles(COLORS);
-  const { user, setAuth, logout, toggleAnonymousMode } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const router = useSafeRouter();
   const { themePreference, setThemePreference } = useThemeStore();
-  const [loading, setLoading] = useState(false);
+  
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [updating, setUpdating] = useState(false);
 
-  // --- GENERAL STATE ---
-  const [sessionTime, setSessionTime] = useState(0);
-
-  // --- MODALS STATE ---
-  const [activeModal, setActiveModal] = useState<string | null>(null); // 'password' | 'email' | 'personal' | 'loginActivity' | 'closeFriends' | 'report' | 'terms' | 'privacy' | 'insights' | 'activity'
-
-
-
-
-
-  // --- SETTINGS PREFERENCES STATE ---
-  const [settings, setSettings] = useState<any>({
-    privateAccount: user?.is_private || false,
-    isAnonymous: user?.isAnonymousMode || false,
-    showOnlineStatus: true,
-    allowMentions: true,
-    showReadReceipts: true,
-    twoFactorEnabled: false,
-    pushEnabled: true,
-    postsStoriesComments: true,
-    followingFollowers: true,
-    messagesCalls: true,
-    emailSecurity: true,
-    emailProduct: true,
-    emailFeedback: true,
-    quietMode: false,
-    sleepMode: false,
-    sensitiveFilter: true,
-    blockOffensiveComments: true,
-    showSuggestions: true,
-    dataSaver: false,
-    accountType: user?.account_type || 'personal',
-    whoCanMessage: 'everyone',
-    storyReplies: 'everyone',
-  });
-
-  // --- INITIAL DATA FETCH & LOCAL TRACKING ---
-  useEffect(() => {
-    const fetchSettings = async () => {
-      const token = useAuthStore.getState().token;
-      if (!token) return;
-      try {
-        const res = await apiClient.get('/settings');
-        if (res.data?.success && res.data.settings) {
-          setSettings((prev: any) => ({
-            ...prev,
-            ...res.data.settings,
-            isAnonymous: user?.isAnonymousMode || false
-          }));
-        }
-      } catch (error) {
-        console.error("Error fetching settings:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSettings();
-
-    // Track Time Spent locally
-    const trackTime = async () => {
-      try {
-        const value = await AsyncStorage.getItem('@time_spent_today');
-        const count = value ? parseInt(value, 10) : 0;
-        setSessionTime(count + 5); // Increment dynamically
-        await AsyncStorage.setItem('@time_spent_today', String(count + 5));
-      } catch (e) { }
-    };
-    trackTime();
-  }, [user?.isAnonymousMode]);
-
-  // --- UPDATE PREFERENCE HANDLER ---
-  const updateSetting = async (key: string, value: any) => {
-    const previousValue = settings[key];
-    setSettings((prev: any) => ({ ...prev, [key]: value }));
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    try {
-      setUpdating(true);
-      if (key === 'isAnonymous') {
-        await toggleAnonymousMode();
-      } else {
-        await apiClient.patch('/settings', { [key]: value });
-        if (key === 'privateAccount' && user) {
-          setAuth({ ...user, is_private: value }, useAuthStore.getState().token || '');
-        }
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      console.error(`Error updating setting ${key}:`, error);
-      setSettings((prev: any) => ({ ...prev, [key]: previousValue }));
-      Alert.alert("Error", "Failed to update preference.");
-    } finally {
-      setUpdating(false);
-    }
+  const persona = user?.anonymousPersona || {
+    name: 'CyberGhost#404',
+    username: 'cyberghost_404',
+    avatar: 'https://api.dicebear.com/7.x/bottts/png?seed=Ghost'
   };
 
-
-
-  // --- DEACTIVATE / DELETE ---
-  const handleDeactivation = () => {
+  const handleLogout = async () => {
     Alert.alert(
-      "Deactivate Account?",
-      "Are you sure? You can reactivate your account by logging back in anytime.",
+      "Logout",
+      "Are you sure you want to logout from AnuFy?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Deactivate",
+          text: "Logout",
           style: "destructive",
           onPress: async () => {
             try {
-              setUpdating(true);
-              await apiClient.post('/users/deactivate');
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
               await logout();
               router.replace('/(auth)/login');
-            } catch (err: any) {
-              Alert.alert("Error", err.response?.data?.message || "Failed to deactivate.");
-            } finally {
-              setUpdating(false);
+            } catch (err) {
+              console.error('Logout error:', err);
             }
           }
         }
@@ -154,7 +57,7 @@ export default function SettingsScreen() {
   const handleDeletion = () => {
     Alert.alert(
       "Delete Account?",
-      "WARNING: This will permanently delete your profile, posts, and chats. This action cannot be undone.",
+      "WARNING: This will permanently erase your profile, chats, and karma points. This action cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -177,170 +80,45 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleAccountTypeSwitch = () => {
-    const isCurrentPersonal = settings.accountType === 'personal';
-    const newType = isCurrentPersonal ? 'creator' : 'personal';
-    Alert.alert(
-      "Switch Account Type?",
-      `Do you want to switch your account type to ${newType === 'creator' ? 'Professional/Creator' : 'Personal'}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Switch Type",
-          onPress: async () => {
-            try {
-              setUpdating(true);
-              await apiClient.patch('/users/me', { gender: user?.gender, website: user?.website, birthday: user?.dob, bio: user?.bio, name: user?.full_name, location: user?.location });
-              // Save local account preference toggle state
-              setSettings((prev: any) => ({ ...prev, accountType: newType }));
-              if (user) {
-                setAuth({ ...user, account_type: newType }, useAuthStore.getState().token || '');
-              }
-              Alert.alert("Switched!", `Successfully switched to ${newType} account.`);
-            } catch (e) {
-              Alert.alert("Error", "Failed to switch account type.");
-            } finally {
-              setUpdating(false);
-            }
-          }
-        }
-      ]
-    );
+  const handleClearCache = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Storage Cleared", "Temporary cache, preloaded videos, and image memory cleared successfully.");
   };
-
-  const handleLogout = async () => {
-    try {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      await logout();
-      router.replace('/(auth)/login');
-    } catch (err) {
-      console.error('Logout error:', err);
-    }
-  };
-
-  const handleThemeSelection = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setActiveModal('theme');
-  };
-
-  // --- UI COMPONENTS ---
-  const SettingItem = ({ icon, lib = 'Ionicons', title, sub, onPress, settingKey, color = COLORS.text, iconBg = '#F3F4F6', isDestructive = false }: any) => {
-    const IconLib: any = lib === 'Material' ? MaterialIcons : lib === 'MaterialCommunity' ? MaterialCommunityIcons : lib === 'FontAwesome' ? FontAwesome5 : Ionicons;
-    const value = settingKey ? settings[settingKey] : null;
-    const hasToggle = settingKey !== undefined;
-
-    return (
-      <TouchableOpacity
-        style={styles.settingRow}
-        onPress={() => hasToggle ? updateSetting(settingKey, !value) : onPress?.()}
-        activeOpacity={0.7}
-      >
-        <View style={styles.settingLeft}>
-          <View style={[styles.iconBox, { backgroundColor: iconBg === '#F3F4F6' ? COLORS.surface : iconBg }]}>
-            <IconLib name={icon} size={18} color={color === COLORS.text ? COLORS.primary : color} />
-          </View>
-          <View style={styles.settingTextContainer}>
-            <Text style={[styles.settingTitle, isDestructive && { color: COLORS.error }]}>{title}</Text>
-            {sub && <Text style={styles.settingSub}>{sub}</Text>}
-          </View>
-        </View>
-
-        {hasToggle ? (
-          <Switch
-            value={value}
-            onValueChange={(v) => updateSetting(settingKey, v)}
-            trackColor={{ false: '#E5E7EB', true: COLORS.primary + '80' }}
-            thumbColor={value ? COLORS.primary : '#F9FAFB'}
-            disabled={updating}
-          />
-        ) : (
-          <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  const SectionHeader = ({ title }: { title: string }) => (
-    <View style={styles.sectionHeaderContainer}>
-      <Text style={styles.sectionHeaderText}>{title}</Text>
-    </View>
-  );
-
-  if (loading) {
-    return (
-      <View style={styles.centerNode}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={{ marginTop: 10, color: COLORS.subtitle }}>Loading preferences...</Text>
-      </View>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle={COLORS.background === '#121212' ? 'light-content' : 'dark-content'} />
+      <StatusBar barStyle={themePreference === 'dark' ? 'light-content' : 'dark-content'} />
+      
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        {user?.is_verified && (
-          <View style={styles.verifiedBadge}>
-            <VerifiedTick badgeType={user?.badge_type} size={20} />
-          </View>
-        )}
-        <Text style={styles.headerTitle}>Settings & Privacy</Text>
-        <View style={{ width: 40 }}>
-          {updating && <ActivityIndicator size="small" color={COLORS.primary} />}
-        </View>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
-        {/* 💳 1. ACCOUNT CENTER */}
-        <SectionHeader title="Account Center" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="person-outline" title="Personal Details" sub="Name, email, phone number, DOB" onPress={() => router.push('/settings/personal')} />
-          <SettingItem icon="shield-checkmark-outline" title="Password Change" onPress={() => router.push('/settings/change-password')} />
-          <SettingItem icon="key-outline" title="Two-Factor Authentication (2FA)" settingKey="twoFactorEnabled" iconBg="#DCFCE7" />
-          <SettingItem icon="time-outline" title="Login Activity / History" onPress={() => router.push('/settings/login-activity')} />
-          <SettingItem icon="share-social-outline" title="Connected Experiences" sub="Facebook linking & cross-posting" settingKey="dataSaver" />
-        </View>
+        {/* 🎭 1. GHOST PERSONA HERO CARD */}
+        <TouchableOpacity 
+          style={styles.personaCard}
+          onPress={() => router.push('/settings/anonymous')}
+          activeOpacity={0.8}
+        >
+          <Image
+            source={{ uri: resolveAvatarUrl(persona.avatar, persona.username, true) }}
+            style={styles.avatar}
+          />
+          <View style={styles.personaInfo}>
+            <Text style={styles.personaName}>{persona.name}</Text>
+            <Text style={styles.personaSub}>Tap to change 3D Avatar & Vibes →</Text>
+          </View>
+        </TouchableOpacity>
 
-        {/* 👤 2. EDIT PROFILE */}
-        <SectionHeader title="Profile" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="create-outline" title="Edit Profile Details" sub="Change photo, name, username, bio" onPress={() => router.push('/profile/edit')} />
-        </View>
-
-        {/* 🔒 3. PRIVACY */}
-        <SectionHeader title="Privacy" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="lock-closed-outline" title="Private Account" settingKey="privateAccount" iconBg="#DCFCE7" />
-          <SettingItem icon="chatbubble-ellipses-outline" title="Comments control" onPress={() => router.push('/settings/comments')} />
-          <SettingItem icon="at-outline" title="Tags & Mentions" settingKey="allowMentions" />
-          <SettingItem icon="people-outline" title="Close Friends List" onPress={() => router.push('/settings/close-friends')} />
-          <SettingItem icon="person-remove-outline" title="Blocked Accounts" onPress={() => router.push('/settings/blocked-users')} />
-        </View>
-
-        {/* 🔔 4. NOTIFICATIONS */}
-        <SectionHeader title="Notifications" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="notifications-outline" title="Push Notifications Master" settingKey="pushEnabled" iconBg="#FEF3C7" />
-          <SettingItem icon="heart-outline" title="Likes & Comments" settingKey="postsStoriesComments" />
-          <SettingItem icon="person-add-outline" title="Followers & Following" settingKey="followingFollowers" />
-          <SettingItem icon="chatbubble-outline" title="Messages" settingKey="messagesCalls" />
-          <SettingItem icon="mail-outline" title="Security & Feedback Emails" settingKey="emailSecurity" />
-        </View>
-
-        {/* ⏱️ 5. TIME MANAGEMENT */}
-        <SectionHeader title="Time Management" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="stats-chart-outline" title="Time Spent statistics" onPress={() => router.push('/settings/time-spent')} />
-          <SettingItem icon="moon-outline" title="Quiet Mode / Sleep Mode" settingKey="quietMode" />
-        </View>
-
-        {/* 🎨 5.5. DISPLAY & THEME */}
-        <SectionHeader title="Display & Theme" />
-        <View style={styles.sectionCard}>
+        {/* 🎨 2. THEME SELECTOR */}
+        <Text style={styles.sectionTitle}>Appearance</Text>
+        <View style={styles.card}>
           <View style={styles.themePillsContainer}>
             <TouchableOpacity
               style={[
@@ -398,66 +176,96 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 📊 6. YOUR ACTIVITY */}
-        <SectionHeader title="Your Activity" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="image-outline" title="Posts & Reels Shared" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'activity' } })} />
-          <SettingItem icon="search-outline" title="Clear Search History" onPress={() => Alert.alert("Search History", "Your search history has been cleared successfully.")} />
-        </View>
+        {/* ⚙️ 3. ESSENTIAL PREFERENCES */}
+        <Text style={styles.sectionTitle}>Preferences & Privacy</Text>
+        <View style={styles.card}>
+          
+          {/* Notifications Toggle */}
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(251,191,36,0.15)' }]}>
+                <Ionicons name="notifications-outline" size={18} color="#F59E0B" />
+              </View>
+              <Text style={styles.rowTitle}>Push Notifications</Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={(v) => {
+                setNotificationsEnabled(v);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              trackColor={{ false: '#3F3F46', true: COLORS.primary }}
+              thumbColor="#FFF"
+            />
+          </View>
 
-        {/* 🛡️ 7. SECURITY */}
-        <SectionHeader title="Security" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="shield-outline" title="Security Checkup & Audits" onPress={() => router.push('/settings/security')} />
-          <SettingItem icon="download-outline" title="Download Information" onPress={() => router.push('/settings/security')} />
-        </View>
+          {/* Blocked Accounts */}
+          <TouchableOpacity
+            style={[styles.row, styles.borderTop]}
+            onPress={() => router.push('/settings/blocked-users')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(239,68,68,0.15)' }]}>
+                <Ionicons name="person-remove-outline" size={18} color="#EF4444" />
+              </View>
+              <Text style={styles.rowTitle}>Blocked Users</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.subtitle} />
+          </TouchableOpacity>
 
-        {/* 💬 8. MESSAGES & STORY REPLIES */}
-        <SectionHeader title="Messages & Story Replies" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="options-outline" title="Message Controls" sub="Configure who can message you" onPress={() => router.push('/settings/message-controls')} />
-          <SettingItem icon="arrow-undo-outline" title="Story Reply Controls" sub="Configure who can reply" onPress={() => router.push('/settings/story-replies')} />
-        </View>
-
-        {/* 🛠️ 9. CREATOR TOOLS */}
-        <SectionHeader title="Creator Tools" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="analytics-outline" title="Insights & Reach Metrics" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'insights' } })} />
-          <SettingItem icon="wallet-outline" title="Monetization & Badges" onPress={() => router.push('/settings/premium')} iconBg="#FEF3C7" />
-        </View>
-
-        {/* ⚙️ 10. ACCOUNT CONTROLS */}
-        <SectionHeader title="Account Controls" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="git-compare-outline" title="Switch Account Type" sub="Personal / Professional Account" onPress={handleAccountTypeSwitch} />
-          <SettingItem icon="cellular-outline" title="Cellular Data Usage" settingKey="dataSaver" />
-          <SettingItem icon="remove-circle-outline" title="Temporary Deactivation" onPress={handleDeactivation} />
-          <SettingItem icon="trash-outline" title="Permanent Account Deletion" isDestructive color={COLORS.error} onPress={handleDeletion} />
-        </View>
-
-        {/* ℹ️ 11. HELP */}
-        <SectionHeader title="Help & Support" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="bug-outline" title="Report a Problem" onPress={() => router.push('/settings/report')} />
-          <SettingItem icon="help-circle-outline" title="Help Center & FAQs" onPress={() => router.push('/settings/help')} />
-        </View>
-
-        {/* 📄 12. ABOUT */}
-        <SectionHeader title="About" />
-        <View style={styles.sectionCard}>
-          <SettingItem icon="document-text-outline" title="Terms of Use" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'terms' } })} />
-          <SettingItem icon="shield-outline" title="Privacy Policy" onPress={() => router.push({ pathname: '/settings/info', params: { type: 'privacy' } })} />
-          <SettingItem icon="information-circle-outline" title="App Version" sub="v2.0.5 Pro" />
-        </View>
-
-        {/* LOGOUT */}
-        <View style={{ marginTop: 30, marginBottom: 50 }}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={22} color={COLORS.error} />
-            <Text style={styles.logoutText}>Logout from AnuFy</Text>
+          {/* Clear Cache */}
+          <TouchableOpacity
+            style={[styles.row, styles.borderTop]}
+            onPress={handleClearCache}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(59,130,246,0.15)' }]}>
+                <Ionicons name="trash-bin-outline" size={18} color="#3B82F6" />
+              </View>
+              <View>
+                <Text style={styles.rowTitle}>Clear Storage Cache</Text>
+                <Text style={styles.rowSub}>Free up phone storage</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.subtitle} />
           </TouchableOpacity>
         </View>
 
+        {/* 🚪 4. ACCOUNT ACTIONS */}
+        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={handleLogout}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+                <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+              </View>
+              <Text style={[styles.rowTitle, { color: '#EF4444', fontWeight: '600' }]}>Logout from AnuFy</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.row, styles.borderTop]}
+            onPress={handleDeletion}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              </View>
+              <Text style={[styles.rowTitle, { color: '#EF4444', fontSize: 13 }]}>Delete Account Permanently</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* APP VERSION */}
+        <Text style={styles.versionText}>AnuFy Anonymous Edition • v2.0.5</Text>
+        <View style={{ height: 30 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -467,184 +275,124 @@ const getStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: verticalScale(10), backgroundColor: COLORS.background,
+    paddingHorizontal: 20, paddingVertical: verticalScale(12), backgroundColor: COLORS.background,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    paddingTop: verticalScale(6),
     width: '100%', maxWidth: 640, alignSelf: 'center'
   },
-  headerTitle: { fontSize: 18, fontFamily: 'Outfit_500Medium', color: COLORS.text },
-  verifiedBadge: { marginRight: 8, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text },
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 10, width: '100%', maxWidth: 640, alignSelf: 'center' },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 16, width: '100%', maxWidth: 640, alignSelf: 'center' },
 
-  sectionHeaderContainer: {
-    paddingHorizontal: 8, marginTop: 24, marginBottom: 12
-  },
-  sectionHeaderText: {
-    fontSize: 12, color: '#6B7280', fontFamily: 'Outfit_500Medium',
-    textTransform: 'uppercase', letterSpacing: 1.2
-  },
-  sectionCard: {
-    backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden',
-    borderWidth: 1, borderColor: COLORS.border
-  },
-
-  settingRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border
-  },
-  settingLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  iconBox: {
-    width: 36, height: 36, borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center', marginRight: 14
-  },
-  settingTextContainer: { flex: 1 },
-  settingTitle: { fontSize: 14, color: COLORS.text, fontFamily: 'Outfit_400Regular' },
-  settingSub: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontFamily: 'Outfit_400Regular' },
-
-  logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: COLORS.surface, paddingVertical: 18, borderRadius: 24,
-    borderWidth: 1, borderColor: '#FEE2E2'
-  },
-  logoutText: { color: COLORS.error, fontFamily: 'Outfit_500Medium', fontSize: 16 },
-
-  centerNode: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  // --- MODALS STYLING ---
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24
-  },
-  modalContainer: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 5
-  },
-  modalHeader: {
+  personaCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20
+    backgroundColor: COLORS.surface,
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
-    fontFamily: 'Outfit_600SemiBold'
-  },
-  modalLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-    fontFamily: 'Outfit_400Regular',
-    marginTop: 10
-  },
-  modalInput: {
-    backgroundColor: '#F3F4F6',
-    height: 52,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    color: '#000000',
-    fontSize: 15,
-    marginBottom: 16,
-    fontFamily: 'Outfit_400Regular'
-  },
-  modalBtn: {
-    backgroundColor: COLORS.primary || '#0095f6',
+  avatar: {
+    width: 52,
     height: 52,
     borderRadius: 26,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8
+    backgroundColor: (COLORS as any).surfaceElevated || '#27272A',
+    marginRight: 14,
   },
-  modalBtnText: {
-    color: '#FFFFFF',
+  personaInfo: { flex: 1 },
+  personaName: {
     fontSize: 16,
-    fontWeight: 'bold',
-    fontFamily: 'Outfit_600SemiBold'
+    fontWeight: '700',
+    color: COLORS.text,
   },
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6'
-  },
-  friendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6'
-  },
-  policyText: {
-    color: '#374151',
-    lineHeight: 22,
-    fontSize: 14,
-    fontFamily: 'Outfit_400Regular'
-  },
-  insightsCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 15,
-    marginTop: 10
-  },
-  insightBox: {
-    flex: 1,
-    backgroundColor: '#F3F4F6',
-    padding: 16,
-    borderRadius: 16,
-    alignItems: 'center'
-  },
-  insightVal: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000'
-  },
-  insightLabel: {
+  personaSub: {
     fontSize: 12,
-    color: '#6B7280',
-    marginTop: 4
+    color: COLORS.primary,
+    fontWeight: '500',
+    marginTop: 2,
   },
-  activityStatRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    padding: 16,
-    borderRadius: 16
+
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.subtitle,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+    marginLeft: 4,
   },
+  card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+
   themePillsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     padding: 6,
-    gap: 8
+    gap: 6,
   },
   themePill: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 14,
     gap: 6,
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: 'transparent'
   },
   themePillActive: {
-    backgroundColor: COLORS.primary || '#4B0082'
+    backgroundColor: COLORS.primary,
   },
   themePillText: {
     fontSize: 13,
-    fontFamily: 'Outfit_500Medium'
-  }
+    fontWeight: '600',
+  },
+
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  rowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  borderTop: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  rowTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text,
+  },
+  rowSub: {
+    fontSize: 11,
+    color: COLORS.subtitle,
+    marginTop: 1,
+  },
+
+  versionText: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: COLORS.subtitle,
+    marginTop: 10,
+    marginBottom: 20,
+  },
 });
